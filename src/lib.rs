@@ -153,8 +153,13 @@
 //!
 //! [alloc]: https://doc.rust-lang.org/alloc/index.html
 #![no_std]
+#![warn(unsafe_op_in_unsafe_fn)]
+
+mod raw_allocator;
+use raw_allocator::RawAllocator;
 
 use core::alloc::{GlobalAlloc, Layout};
+use core::ptr;
 
 /// The memory allocator for embedded systems.
 ///
@@ -174,7 +179,15 @@ use core::alloc::{GlobalAlloc, Layout};
 /// ```
 /// Also please refer to the [crate-level](crate)-documentation for
 /// recommendations on the buffer size and general usage.
-pub struct Allocator<const N: usize>(());
+pub struct Allocator<const N: usize> {
+    /// The internal raw allocator.
+    ///
+    /// The raw allocator handles allocations of contiguous byte slices without
+    /// needing to worry about alignment. The raw allocator is protected by a
+    /// `spin::Mutex` to make it usable with shared references (requirement of
+    /// [`GlobalAlloc`]).
+    raw: spin::Mutex<RawAllocator<N>>,
+}
 impl<const N: usize> Allocator<N> {
     /// Create a new [`Allocator`].
     ///
@@ -189,17 +202,91 @@ impl<const N: usize> Allocator<N> {
     /// than `8` or not divisible by `4`.
     #[must_use = "assign the allocator to a static variable and apply the `#[global_allocator]`-attribute to make it the global allocator"]
     pub const fn new() -> Self {
-        assert!(N >= 8, "too small heap memory: minimum size is 8");
-        assert!(N % 4 == 0, "memory size has to be divisible by 4");
-        Self(())
+        let raw = spin::Mutex::new(RawAllocator::new());
+        Self { raw }
+    }
+
+    /// Align a given pointer to the specified alignment.
+    ///
+    /// # Safety
+    /// This function requires `align` to be a power of two and requires the
+    /// `ptr` to point to a memory region, that is large enough, so that the
+    /// aligned pointer is still in that memory region.
+    unsafe fn align_to(ptr: *mut u8, align: usize) -> *mut u8 {
+        let addr = ptr as usize;
+        let mismatch = addr & (align - 1);
+        let offset = if mismatch != 0 { align - mismatch } else { 0 };
+        // SAFETY: "in-bound"-requirement is part of the safety-contract of this
+        // function, therefore the caller is responsible for it
+        unsafe { ptr.add(offset) }
     }
 }
 unsafe impl<const N: usize> GlobalAlloc for Allocator<N> {
-    unsafe fn alloc(&self, _layout: Layout) -> *mut u8 {
-        todo!()
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let align = layout.align();
+        // the raw allocator always returns 4-byte-aligned slices, therefore
+        // smaller alignments are always fulfilled. Larger alignments are a bit
+        // more tricky, since this requires over-allocation and adjusting the
+        // pointer accordingly. The over-allocation is rather conservative and
+        // uses a worst case estimation, therefore it allocates `align` bytes
+        // more, ensuring there is enough memory.
+        let size = if align > 4 {
+            layout.size() + align
+        } else {
+            layout.size()
+        };
+
+        // allocate a memory block and return the sufficiently aligned pointer
+        // into that memory block.
+        match self.raw.lock().alloc(size) {
+            Some(memory) => unsafe { Self::align_to(ptr::addr_of_mut!(*memory).cast(), align) },
+            None => ptr::null_mut(),
+        }
     }
 
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
-        todo!()
+    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+        // alignment is irrelevant here, as `RawAllocator::free` can handle any
+        // pointer in an entry's memory, so simply forward the pointer. The
+        // `free()`-method might detect errors, but those cannot lead to panics
+        // (by contract of `GlobalAlloc`). Therefore there are two choices:
+        // 1. abort the process
+        // 2. ignore the error
+        // Since there is no process and there is no stable way to abort the
+        // program on `core` the only viable option is option #1: do nothing.
+        let _maybe_error = self.raw.lock().free(ptr.cast()).ok();
+        // errors are ignored
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Allocator;
+    use core::ptr;
+
+    #[test]
+    fn alignment_of_align_to() {
+        // create buffer memory for proper indexing. One could use random
+        // integers and cast them to pointers, but this would violate the strict
+        // provenance rules and `miri` would detect that. Therefore this uses a
+        // valid and suitable aligned buffer and uses pointers into that buffer.
+        #[repr(align(16))]
+        struct Align([u8; 16]);
+        let mut just_a_buffer_to_get_a_valid_address = Align([0_u8; 16]);
+        let base: *mut u8 = ptr::addr_of_mut!(just_a_buffer_to_get_a_valid_address.0).cast();
+
+        // create some pointers to the buffer with some offsets
+        let ptr_0x10 = base;
+        let ptr_0x11 = base.wrapping_add(1);
+        let ptr_0x14 = base.wrapping_add(4);
+        let ptr_0x1c = base.wrapping_add(0xc);
+        let ptr_0x20 = base.wrapping_add(0x10);
+
+        // the actual test for the alignment of `align_to()`
+        assert_eq!(unsafe { Allocator::<8>::align_to(ptr_0x11, 4) }, ptr_0x14);
+        assert_eq!(unsafe { Allocator::<8>::align_to(ptr_0x10, 4) }, ptr_0x10);
+
+        assert_eq!(unsafe { Allocator::<8>::align_to(ptr_0x11, 1) }, ptr_0x11);
+
+        assert_eq!(unsafe { Allocator::<8>::align_to(ptr_0x1c, 16) }, ptr_0x20);
     }
 }
