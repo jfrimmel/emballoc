@@ -291,57 +291,84 @@ mod tests {
         assert_eq!(unsafe { Allocator::<8>::align_to(ptr_0x1c, 16) }, ptr_0x20);
     }
 
+    // the following tests ensure, that a pointer with the requested alignment
+    // is returned
+
+    /// Assert the given alignment of pointers.
+    macro_rules! assert_alignment {
+        ($ptr:expr, $align:expr) => {{
+            assert_eq!(($ptr as usize) % $align, 0, "Alignment not fulfilled");
+        }};
+    }
+
     #[test]
-    fn allocation_with_alignment_of_2() {
+    fn small_alignments() {
         let allocator = Allocator::<32>::new();
+
         let ptr = unsafe { allocator.alloc(Layout::from_size_align(8, 2).unwrap()) };
-        assert_eq!((ptr as usize) % 1, 0);
-    }
+        assert_alignment!(ptr, 1);
 
-    #[test]
-    fn allocation_with_alignment_of_4() {
-        let allocator = Allocator::<32>::new();
         let ptr = unsafe { allocator.alloc(Layout::from_size_align(4, 4).unwrap()) };
-        assert_eq!((ptr as usize) % 4, 0);
+        assert_alignment!(ptr, 4);
     }
 
     #[test]
-    fn allocation_with_alignment_of_8() {
-        let allocator = Allocator::<32>::new();
+    fn medium_alignments() {
+        let allocator = Allocator::<128>::new();
+
         let ptr = unsafe { allocator.alloc(Layout::from_size_align(4, 8).unwrap()) };
-        assert_eq!((ptr as usize) % 8, 0);
+        assert_alignment!(ptr, 8);
+
+        let ptr = unsafe { allocator.alloc(Layout::from_size_align(4, 32).unwrap()) };
+        assert_alignment!(ptr, 32);
     }
 
     #[cfg(not(miri))] // too slow
     #[test]
-    fn allocation_with_alignment_of_4mb() {
+    fn huge_alignment() {
         // in static memory to prevent stack overflow
         const FOUR_MEG: usize = 4 * 1024 * 1024;
 
         static ALLOCATOR: Allocator<{ 10 * 1024 * 1024 }> = Allocator::new();
         let ptr = unsafe { ALLOCATOR.alloc(Layout::from_size_align(4, FOUR_MEG).unwrap()) };
 
-        assert_eq!((ptr as usize) % FOUR_MEG, 0);
+        assert_alignment!(ptr, FOUR_MEG);
     }
 
     #[test]
     fn example_usage() {
+        // do some example allocations. There is an intermediate deallocation,
+        // different allocation/deallocation-orders, different alignments and
+        // different sizes.
         static ALLOCATOR: Allocator<4096> = Allocator::new();
 
         unsafe {
-            let ptr1 = ALLOCATOR.alloc(Layout::new::<u32>());
+            let layout1 = Layout::new::<u32>();
+            let ptr1 = ALLOCATOR.alloc(layout1);
             assert_ne!(ptr1, ptr::null_mut());
-            let ptr2 = ALLOCATOR.alloc(Layout::new::<f64>());
+
+            let layout2 = Layout::new::<f64>();
+            let ptr2 = ALLOCATOR.alloc(layout2);
             assert_ne!(ptr2, ptr::null_mut());
-            let ptr3 = ALLOCATOR.alloc(Layout::new::<[u16; 12]>());
+
+            let layout3 = Layout::new::<[u16; 12]>();
+            let ptr3 = ALLOCATOR.alloc(layout3);
             assert_ne!(ptr3, ptr::null_mut());
-            ALLOCATOR.dealloc(ptr2, Layout::new::<f64>());
-            let ptr4 = ALLOCATOR.alloc(Layout::new::<[u128; 3]>());
+
+            ALLOCATOR.dealloc(ptr2, layout2);
+
+            let layout4 = Layout::new::<[u128; 3]>();
+            let ptr4 = ALLOCATOR.alloc(layout4);
             assert_ne!(ptr4, ptr::null_mut());
 
-            ALLOCATOR.dealloc(ptr3, Layout::new::<[u16; 12]>());
-            ALLOCATOR.dealloc(ptr4, Layout::new::<[u128; 3]>());
-            ALLOCATOR.dealloc(ptr1, Layout::new::<u32>());
+            let layout5 = Layout::new::<f32>();
+            let ptr5 = ALLOCATOR.alloc(layout5);
+            assert_ne!(ptr5, ptr::null_mut());
+
+            ALLOCATOR.dealloc(ptr3, layout3);
+            ALLOCATOR.dealloc(ptr4, layout4);
+            ALLOCATOR.dealloc(ptr5, layout5);
+            ALLOCATOR.dealloc(ptr1, layout1);
         }
     }
 }

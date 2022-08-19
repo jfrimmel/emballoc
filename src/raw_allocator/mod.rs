@@ -126,21 +126,31 @@ impl<const N: usize> RawAllocator<N> {
 mod tests {
     use super::{Entry, FreeError, RawAllocator};
 
+    /// Test, that the given allocator has exactly the given entries.
+    macro_rules! assert_allocations {
+        ($allocator:expr, $($entry:expr),*$(,)?) => {{
+            let mut iter = $allocator
+                .buffer
+                .entries()
+                .map(|offset| $allocator.buffer[offset]);
+            $(assert_eq!(iter.next(), Some($entry));)*
+            assert_eq!(iter.next(), None);
+        }};
+    }
+
     #[test]
     fn successful_single_allocation() {
         let mut allocator = RawAllocator::<32>::new();
         allocator.alloc(4).unwrap();
-
-        let mut iter = allocator.buffer.entries();
-        assert_eq!(allocator.buffer[iter.next().unwrap()], Entry::used(4));
-        assert_eq!(allocator.buffer[iter.next().unwrap()], Entry::free(20));
-        assert_eq!(iter.next(), None);
+        assert_allocations!(allocator, Entry::used(4), Entry::free(20));
     }
 
     #[test]
     fn unsuccessful_single_allocation() {
+        // the allocation is larger than the buffer itself
         let mut allocator = RawAllocator::<32>::new();
         assert!(allocator.alloc(36).is_none());
+        assert_allocations!(allocator, Entry::free(28));
     }
 
     #[test]
@@ -149,41 +159,80 @@ mod tests {
         allocator.alloc(12).unwrap();
         allocator.alloc(12).unwrap();
         // allocator is now full
+        assert_allocations!(allocator, Entry::used(12), Entry::used(12));
     }
 
     #[test]
     fn unsuccessful_multiple_allocation() {
         let mut allocator = RawAllocator::<32>::new();
         allocator.alloc(12).unwrap();
+        // the second allocation is larger than the remaining space
         assert!(allocator.alloc(13).is_none());
+        assert_allocations!(allocator, Entry::used(12), Entry::free(12));
+    }
+
+    macro_rules! address {
+        ($memory:expr) => {
+            $memory.as_mut_ptr().cast::<u8>()
+        };
+    }
+
+    #[test]
+    fn unsuccessful_allocation_due_to_fragmentation() {
+        // this test case shows, that the allocator is susceptible to memory
+        // fragmentation, which makes larger allocations impossible, if the
+        // heap is in a bad state.
+        let mut allocator = RawAllocator::<60>::new();
+
+        // build a fragmented heap
+        let ptr1 = address!(allocator.alloc(8).unwrap());
+        let _ptr2 = address!(allocator.alloc(8).unwrap());
+        let ptr3 = address!(allocator.alloc(8).unwrap());
+        let _ptr4 = address!(allocator.alloc(8).unwrap());
+        let ptr5 = address!(allocator.alloc(8).unwrap());
+        allocator.free(ptr1).unwrap();
+        allocator.free(ptr3).unwrap();
+        allocator.free(ptr5).unwrap();
+        assert_allocations!(
+            allocator,
+            Entry::free(8),
+            Entry::used(8),
+            Entry::free(8),
+            Entry::used(8),
+            Entry::free(8)
+        );
+
+        // now, there are 24 free bytes (3x 8 bytes) and the headers, but the
+        // allocation of 10 bytes must fail, since there is no contiguous memory
+        // of that size
+        assert!(allocator.alloc(10).is_none());
     }
 
     #[test]
     fn simple_free() {
-        let mut allocator = RawAllocator::<8>::new();
-        let memory = allocator.alloc(4).unwrap();
-        let ptr = memory.as_mut_ptr().cast();
+        let mut allocator = RawAllocator::<16>::new();
+        let ptr = address!(allocator.alloc(4).unwrap());
+        allocator.alloc(4).unwrap();
+        assert_allocations!(allocator, Entry::used(4), Entry::used(4));
 
-        // free the memory without concatenation
+        // now, that the heap is properly built up, there are two used entries.
+        // when the first one is freed up, there is no possibility for merging
+        // the free memory with the following one (as that one is used)
         allocator.free(ptr).unwrap();
-
-        let offset = allocator.buffer.entries().next().unwrap();
-        assert_eq!(allocator.buffer[offset], Entry::free(4));
+        assert_allocations!(allocator, Entry::free(4), Entry::used(4));
     }
 
     #[test]
     fn double_free() {
-        let mut allocator = RawAllocator::<32>::new();
-        let memory = allocator.alloc(4).unwrap();
-        let ptr = memory.as_mut_ptr().cast();
+        let mut allocator = RawAllocator::<16>::new();
+        let ptr = address!(allocator.alloc(4).unwrap());
         allocator.alloc(4).unwrap();
 
-        // free the memory without concatenation
+        // try to free up the pointer twice. The first time has to succeed, but
+        // the second time has to result in a double-free-error.
         allocator.free(ptr).unwrap();
-        assert_eq!(
-            allocator.free(ptr).unwrap_err(),
-            FreeError::DoubleFreeDetected
-        );
+        assert_eq!(allocator.free(ptr), Err(FreeError::DoubleFreeDetected));
+        assert_allocations!(allocator, Entry::free(4), Entry::used(4));
     }
 
     #[test]
@@ -193,77 +242,68 @@ mod tests {
         let mut allocator = RawAllocator::<32>::new();
         allocator.alloc(4).unwrap();
 
-        // free the memory without concatenation
+        // try to free up a pointer, that was not allocated by this allocator.
+        // This invalid usage has to be detected.
         let mut x = 0_u32;
-        assert_eq!(
-            allocator.free(ptr::addr_of_mut!(x).cast()),
-            Err(FreeError::AllocationNotFound)
-        );
+        let ptr = ptr::addr_of_mut!(x).cast();
+        assert_eq!(allocator.free(ptr), Err(FreeError::AllocationNotFound));
     }
 
     #[test]
-    fn free_with_defrag() {
-        let mut allocator = RawAllocator::<32>::new();
-        let memory = allocator.alloc(4).unwrap();
-        let ptr = memory.as_mut_ptr().cast();
+    fn free_of_modified_pointer() {
+        let mut allocator = RawAllocator::<16>::new();
+        let ptr = address!(allocator.alloc(4).unwrap());
+        allocator.alloc(4).unwrap();
+        assert_allocations!(allocator, Entry::used(4), Entry::used(4));
 
-        // free the memory without concatenation
+        let ptr = ptr.wrapping_add(3);
+        // now there is a valid pointer, but this pointer was modified, e.g. to
+        // be aligned properly. As the `free()`-call should support any pointer
+        // into the memory block, this should succeed.
         allocator.free(ptr).unwrap();
+        assert_allocations!(allocator, Entry::free(4), Entry::used(4));
+    }
 
-        let offset = allocator.buffer.entries().next().unwrap();
-        assert_eq!(allocator.buffer[offset], Entry::free(28));
+    #[test]
+    fn free_with_concatenation() {
+        let mut allocator = RawAllocator::<32>::new();
+        let ptr = address!(allocator.alloc(4).unwrap());
+        assert_allocations!(allocator, Entry::used(4), Entry::free(20));
+
+        // now there is a used block followed by a free block. When the used
+        // block is freed up as well, this should lead to a single free block.
+        allocator.free(ptr).unwrap();
+        assert_allocations!(allocator, Entry::free(28));
     }
 
     #[test]
     fn free_at_end() {
-        let mut allocator = RawAllocator::<32>::new();
-        allocator.alloc(20).unwrap();
-        let memory = allocator.alloc(4).unwrap();
-        let ptr = memory.as_mut_ptr().cast();
+        let mut allocator = RawAllocator::<16>::new();
+        allocator.alloc(4).unwrap();
+        let ptr = address!(allocator.alloc(4).unwrap());
+        assert_allocations!(allocator, Entry::used(4), Entry::used(4));
 
-        // free the memory without concatenation
+        // now, that the heap is properly built up, there are two used entries.
+        // when the second one is freed up, there is no possibility for merging
+        // the free memory with the following one (as there is no following one)
         allocator.free(ptr).unwrap();
-
-        let offset = allocator.buffer.entries().nth(1).unwrap();
-        assert_eq!(allocator.buffer[offset], Entry::free(4));
+        assert_allocations!(allocator, Entry::used(4), Entry::free(4));
     }
 
     #[test]
     fn free_impossible_defrag() {
         let mut allocator = RawAllocator::<16>::new();
-        let ptr1 = allocator.alloc(4).unwrap().as_mut_ptr();
-        let ptr2 = allocator.alloc(4).unwrap().as_mut_ptr();
-        allocator.free(ptr1.cast()).unwrap();
+        let ptr1 = address!(allocator.alloc(4).unwrap());
+        let ptr2 = address!(allocator.alloc(4).unwrap());
+        allocator.free(ptr1).unwrap();
 
         // now we have a free block, followed by a used block which in turn gets
         // freed up. Therefore there are two contiguous free blocks, but those
         // aren't concatenated, since the old free block is to the left (instead
         // of to the right).
-        allocator.free(ptr2.cast()).unwrap();
+        allocator.free(ptr2).unwrap();
 
         // therefore there must be two free blocks
-        let mut iter = allocator
-            .buffer
-            .entries()
-            .map(|offset| allocator.buffer[offset]);
-        assert_eq!(iter.next(), Some(Entry::free(4)));
-        assert_eq!(iter.next(), Some(Entry::free(4)));
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn entries() {
-        let mut allocator = RawAllocator::<256>::new();
-        allocator.alloc(8).unwrap();
-        allocator.alloc(56).unwrap();
-
-        let mut iter = allocator
-            .buffer
-            .entries()
-            .map(|offset| allocator.buffer[offset]);
-        assert_eq!(iter.next(), Some(Entry::used(8)));
-        assert_eq!(iter.next(), Some(Entry::used(56)));
-        assert_eq!(iter.next(), Some(Entry::free(180)));
-        assert_eq!(iter.next(), None);
+        assert_allocations!(allocator, Entry::free(4), Entry::free(4));
     }
 }
