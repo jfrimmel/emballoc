@@ -2,6 +2,8 @@
 //!
 //! A "raw allocator" is one, that simply gets request for a specific memory
 //! size but does not need to worry about alignment.
+mod entry;
+
 use core::mem::MaybeUninit;
 
 /// An error occurred when calling `free()`.
