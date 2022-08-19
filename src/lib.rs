@@ -152,9 +152,14 @@
 //!     lets the user decide, whether that feature is necessary or not.
 //!
 //! [alloc]: https://doc.rust-lang.org/alloc/index.html
-#![no_std]
+#![cfg_attr(not(test), no_std)]
+#![warn(unsafe_op_in_unsafe_fn)]
+
+mod raw_allocator;
+use raw_allocator::RawAllocator;
 
 use core::alloc::{GlobalAlloc, Layout};
+use core::ptr;
 
 /// The memory allocator for embedded systems.
 ///
@@ -174,7 +179,15 @@ use core::alloc::{GlobalAlloc, Layout};
 /// ```
 /// Also please refer to the [crate-level](crate)-documentation for
 /// recommendations on the buffer size and general usage.
-pub struct Allocator<const N: usize>(());
+pub struct Allocator<const N: usize> {
+    /// The internal raw allocator.
+    ///
+    /// The raw allocator handles allocations of contiguous byte slices without
+    /// needing to worry about alignment. The raw allocator is protected by a
+    /// `spin::Mutex` to make it usable with shared references (requirement of
+    /// [`GlobalAlloc`]).
+    raw: spin::Mutex<RawAllocator<N>>,
+}
 impl<const N: usize> Allocator<N> {
     /// Create a new [`Allocator`].
     ///
@@ -189,17 +202,173 @@ impl<const N: usize> Allocator<N> {
     /// than `8` or not divisible by `4`.
     #[must_use = "assign the allocator to a static variable and apply the `#[global_allocator]`-attribute to make it the global allocator"]
     pub const fn new() -> Self {
-        assert!(N >= 8, "too small heap memory: minimum size is 8");
-        assert!(N % 4 == 0, "memory size has to be divisible by 4");
-        Self(())
+        let raw = spin::Mutex::new(RawAllocator::new());
+        Self { raw }
+    }
+
+    /// Align a given pointer to the specified alignment.
+    ///
+    /// # Safety
+    /// This function requires `align` to be a power of two and requires the
+    /// `ptr` to point to a memory region, that is large enough, so that the
+    /// aligned pointer is still in that memory region.
+    unsafe fn align_to(ptr: *mut u8, align: usize) -> *mut u8 {
+        let addr = ptr as usize;
+        let mismatch = addr & (align - 1);
+        let offset = if mismatch != 0 { align - mismatch } else { 0 };
+        // SAFETY: "in-bound"-requirement is part of the safety-contract of this
+        // function, therefore the caller is responsible for it
+        unsafe { ptr.add(offset) }
     }
 }
 unsafe impl<const N: usize> GlobalAlloc for Allocator<N> {
-    unsafe fn alloc(&self, _layout: Layout) -> *mut u8 {
-        todo!()
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let align = layout.align();
+        // the raw allocator always returns 4-byte-aligned slices, therefore
+        // smaller alignments are always fulfilled. Larger alignments are a bit
+        // more tricky, since this requires over-allocation and adjusting the
+        // pointer accordingly. The over-allocation is rather conservative and
+        // uses a worst case estimation, therefore it allocates `align` bytes
+        // more, ensuring there is enough memory.
+        let size = if align > 4 {
+            layout.size() + align
+        } else {
+            layout.size()
+        };
+
+        // allocate a memory block and return the sufficiently aligned pointer
+        // into that memory block.
+        match self.raw.lock().alloc(size) {
+            Some(memory) => unsafe { Self::align_to(ptr::addr_of_mut!(*memory).cast(), align) },
+            None => ptr::null_mut(),
+        }
     }
 
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
-        todo!()
+    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+        // alignment is irrelevant here, as `RawAllocator::free` can handle any
+        // pointer in an entry's memory, so simply forward the pointer. The
+        // `free()`-method might detect errors, but those cannot lead to panics
+        // (by contract of `GlobalAlloc`). Therefore there are two choices:
+        // 1. abort the process
+        // 2. ignore the error
+        // Since there is no process and there is no stable way to abort the
+        // program on `core` the only viable option is option #1: do nothing.
+        let _maybe_error = self.raw.lock().free(ptr.cast()).ok();
+        // errors are ignored
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Allocator;
+    use core::alloc::{GlobalAlloc, Layout};
+    use core::ptr;
+
+    #[test]
+    fn alignment_of_align_to() {
+        // create buffer memory for proper indexing. One could use random
+        // integers and cast them to pointers, but this would violate the strict
+        // provenance rules and `miri` would detect that. Therefore this uses a
+        // valid and suitable aligned buffer and uses pointers into that buffer.
+        #[repr(align(16))]
+        struct Align([u8; 16]);
+        let mut just_a_buffer_to_get_a_valid_address = Align([0_u8; 16]);
+        let base: *mut u8 = ptr::addr_of_mut!(just_a_buffer_to_get_a_valid_address.0).cast();
+
+        // create some pointers to the buffer with some offsets
+        let ptr_0x10 = base;
+        let ptr_0x11 = base.wrapping_add(1);
+        let ptr_0x14 = base.wrapping_add(4);
+        let ptr_0x1c = base.wrapping_add(0xc);
+        let ptr_0x20 = base.wrapping_add(0x10);
+
+        // the actual test for the alignment of `align_to()`
+        assert_eq!(unsafe { Allocator::<8>::align_to(ptr_0x11, 4) }, ptr_0x14);
+        assert_eq!(unsafe { Allocator::<8>::align_to(ptr_0x10, 4) }, ptr_0x10);
+
+        assert_eq!(unsafe { Allocator::<8>::align_to(ptr_0x11, 1) }, ptr_0x11);
+
+        assert_eq!(unsafe { Allocator::<8>::align_to(ptr_0x1c, 16) }, ptr_0x20);
+    }
+
+    // the following tests ensure, that a pointer with the requested alignment
+    // is returned
+
+    /// Assert the given alignment of pointers.
+    macro_rules! assert_alignment {
+        ($ptr:expr, $align:expr) => {{
+            assert_eq!(($ptr as usize) % $align, 0, "Alignment not fulfilled");
+        }};
+    }
+
+    #[test]
+    fn small_alignments() {
+        let allocator = Allocator::<32>::new();
+
+        let ptr = unsafe { allocator.alloc(Layout::from_size_align(8, 2).unwrap()) };
+        assert_alignment!(ptr, 1);
+
+        let ptr = unsafe { allocator.alloc(Layout::from_size_align(4, 4).unwrap()) };
+        assert_alignment!(ptr, 4);
+    }
+
+    #[test]
+    fn medium_alignments() {
+        let allocator = Allocator::<128>::new();
+
+        let ptr = unsafe { allocator.alloc(Layout::from_size_align(4, 8).unwrap()) };
+        assert_alignment!(ptr, 8);
+
+        let ptr = unsafe { allocator.alloc(Layout::from_size_align(4, 32).unwrap()) };
+        assert_alignment!(ptr, 32);
+    }
+
+    #[cfg(not(miri))] // too slow
+    #[test]
+    fn huge_alignment() {
+        // in static memory to prevent stack overflow
+        const FOUR_MEG: usize = 4 * 1024 * 1024;
+
+        static ALLOCATOR: Allocator<{ 10 * 1024 * 1024 }> = Allocator::new();
+        let ptr = unsafe { ALLOCATOR.alloc(Layout::from_size_align(4, FOUR_MEG).unwrap()) };
+
+        assert_alignment!(ptr, FOUR_MEG);
+    }
+
+    #[test]
+    fn example_usage() {
+        // do some example allocations. There is an intermediate deallocation,
+        // different allocation/deallocation-orders, different alignments and
+        // different sizes.
+        static ALLOCATOR: Allocator<4096> = Allocator::new();
+
+        unsafe {
+            let layout1 = Layout::new::<u32>();
+            let ptr1 = ALLOCATOR.alloc(layout1);
+            assert_ne!(ptr1, ptr::null_mut());
+
+            let layout2 = Layout::new::<f64>();
+            let ptr2 = ALLOCATOR.alloc(layout2);
+            assert_ne!(ptr2, ptr::null_mut());
+
+            let layout3 = Layout::new::<[u16; 12]>();
+            let ptr3 = ALLOCATOR.alloc(layout3);
+            assert_ne!(ptr3, ptr::null_mut());
+
+            ALLOCATOR.dealloc(ptr2, layout2);
+
+            let layout4 = Layout::new::<[u128; 3]>();
+            let ptr4 = ALLOCATOR.alloc(layout4);
+            assert_ne!(ptr4, ptr::null_mut());
+
+            let layout5 = Layout::new::<f32>();
+            let ptr5 = ALLOCATOR.alloc(layout5);
+            assert_ne!(ptr5, ptr::null_mut());
+
+            ALLOCATOR.dealloc(ptr3, layout3);
+            ALLOCATOR.dealloc(ptr4, layout4);
+            ALLOCATOR.dealloc(ptr5, layout5);
+            ALLOCATOR.dealloc(ptr1, layout1);
+        }
     }
 }

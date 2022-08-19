@@ -11,3 +11,8 @@ rust-version = "1.62"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies.spin]
+version = "0.9.4"
+default-features = false
+features = ["mutex", "spin_mutex"]
