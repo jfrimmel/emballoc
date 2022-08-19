@@ -134,6 +134,12 @@ impl<const N: usize> Buffer<N> {
         &mut self.0[offset..offset + size]
     }
 
+    /// Query the following entry, if there is a following entry.
+    ///
+    /// This function takes a [`ValidatedOffset`] of one entry and tries to
+    /// obtain a mutable reference to the entry after it. If there is no entry
+    /// after it (because the given one is the last in the buffer) then `None`
+    /// is returned.
     pub fn following_entry(&mut self, offset: ValidatedOffset) -> Option<&mut MaybeUninit<Entry>> {
         let offset = offset.0;
         let entry = unsafe { self.at(offset).assume_init_ref() };
@@ -147,15 +153,15 @@ impl<const N: usize> core::ops::Index<ValidatedOffset> for Buffer<N> {
     type Output = Entry;
 
     fn index(&self, index: ValidatedOffset) -> &Self::Output {
-        // SAFETY: the `EntryOffset` marks the read valid (safety invariant of
-        // that type)
+        // SAFETY: the `ValidatedOffset` marks the read valid (safety invariant
+        // of that type)
         unsafe { self.at(index.0).assume_init_ref() }
     }
 }
 impl<const N: usize> core::ops::IndexMut<ValidatedOffset> for Buffer<N> {
     fn index_mut(&mut self, index: ValidatedOffset) -> &mut Self::Output {
-        // SAFETY: the `EntryOffset` marks the read valid (safety invariant of
-        // that type)
+        // SAFETY: the `ValidatedOffset` marks the read valid (safety invariant
+        // of that type)
         unsafe { self.at_mut(index.0).assume_init_mut() }
     }
 }

@@ -118,7 +118,8 @@ impl<const N: usize> RawAllocator<N> {
             .map(|entry| unsafe { entry.assume_init_ref() })
             .filter(|entry| entry.state() == State::Free)
             .map_or(0, |entry| entry.size() + mem::size_of::<Entry>());
-        Ok(self.buffer[offset] = Entry::free(entry.size() + additional_memory))
+        self.buffer[offset] = Entry::free(entry.size() + additional_memory);
+        Ok(())
     }
 }
 
