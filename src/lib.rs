@@ -152,7 +152,7 @@
 //!     lets the user decide, whether that feature is necessary or not.
 //!
 //! [alloc]: https://doc.rust-lang.org/alloc/index.html
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 #![warn(unsafe_op_in_unsafe_fn)]
 
 mod raw_allocator;
@@ -261,6 +261,7 @@ unsafe impl<const N: usize> GlobalAlloc for Allocator<N> {
 #[cfg(test)]
 mod tests {
     use crate::Allocator;
+    use core::alloc::{GlobalAlloc, Layout};
     use core::ptr;
 
     #[test]
@@ -288,5 +289,59 @@ mod tests {
         assert_eq!(unsafe { Allocator::<8>::align_to(ptr_0x11, 1) }, ptr_0x11);
 
         assert_eq!(unsafe { Allocator::<8>::align_to(ptr_0x1c, 16) }, ptr_0x20);
+    }
+
+    #[test]
+    fn allocation_with_alignment_of_2() {
+        let allocator = Allocator::<32>::new();
+        let ptr = unsafe { allocator.alloc(Layout::from_size_align(8, 2).unwrap()) };
+        assert_eq!((ptr as usize) % 1, 0);
+    }
+
+    #[test]
+    fn allocation_with_alignment_of_4() {
+        let allocator = Allocator::<32>::new();
+        let ptr = unsafe { allocator.alloc(Layout::from_size_align(4, 4).unwrap()) };
+        assert_eq!((ptr as usize) % 4, 0);
+    }
+
+    #[test]
+    fn allocation_with_alignment_of_8() {
+        let allocator = Allocator::<32>::new();
+        let ptr = unsafe { allocator.alloc(Layout::from_size_align(4, 8).unwrap()) };
+        assert_eq!((ptr as usize) % 8, 0);
+    }
+
+    #[cfg(not(miri))] // too slow
+    #[test]
+    fn allocation_with_alignment_of_4mb() {
+        // in static memory to prevent stack overflow
+        const FOUR_MEG: usize = 4 * 1024 * 1024;
+
+        static ALLOCATOR: Allocator<{ 10 * 1024 * 1024 }> = Allocator::new();
+        let ptr = unsafe { ALLOCATOR.alloc(Layout::from_size_align(4, FOUR_MEG).unwrap()) };
+
+        assert_eq!((ptr as usize) % FOUR_MEG, 0);
+    }
+
+    #[test]
+    fn example_usage() {
+        static ALLOCATOR: Allocator<4096> = Allocator::new();
+
+        unsafe {
+            let ptr1 = ALLOCATOR.alloc(Layout::new::<u32>());
+            assert_ne!(ptr1, ptr::null_mut());
+            let ptr2 = ALLOCATOR.alloc(Layout::new::<f64>());
+            assert_ne!(ptr2, ptr::null_mut());
+            let ptr3 = ALLOCATOR.alloc(Layout::new::<[u16; 12]>());
+            assert_ne!(ptr3, ptr::null_mut());
+            ALLOCATOR.dealloc(ptr2, Layout::new::<f64>());
+            let ptr4 = ALLOCATOR.alloc(Layout::new::<[u128; 3]>());
+            assert_ne!(ptr4, ptr::null_mut());
+
+            ALLOCATOR.dealloc(ptr3, Layout::new::<[u16; 12]>());
+            ALLOCATOR.dealloc(ptr4, Layout::new::<[u128; 3]>());
+            ALLOCATOR.dealloc(ptr1, Layout::new::<u32>());
+        }
     }
 }
