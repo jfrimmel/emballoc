@@ -141,11 +141,9 @@ impl<const N: usize> Buffer<N> {
     /// after it (because the given one is the last in the buffer) then `None`
     /// is returned.
     pub fn following_entry(&mut self, offset: ValidatedOffset) -> Option<&mut MaybeUninit<Entry>> {
-        let offset = offset.0;
-        let entry = unsafe { self.at(offset).assume_init_ref() };
-        let size = entry.size();
+        let size = self[offset].size();
 
-        let offset = offset + size + mem::size_of::<Entry>();
+        let offset = offset.0 + size + mem::size_of::<Entry>();
         (offset < N).then(|| self.at_mut(offset))
     }
 }
