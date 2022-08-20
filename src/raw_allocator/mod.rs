@@ -29,6 +29,7 @@ pub enum FreeError {
 ///
 /// Note, that the allocated memory is always aligned to `4`.
 pub struct RawAllocator<const N: usize> {
+    /// The internal buffer abstracting over the raw bytes of the heap.
     buffer: buffer::Buffer<N>,
 }
 impl<const N: usize> RawAllocator<N> {

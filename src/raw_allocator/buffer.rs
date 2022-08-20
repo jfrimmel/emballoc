@@ -1,3 +1,8 @@
+//! Module providing the [`Buffer`] abstraction and its related types.
+//!
+//! This module tries to encapsulate all the low-level details on working with
+//! uninitialized heap memory, alignment into that buffer and reading/writing
+//! [`Entry`]s.
 use super::entry::{Entry, State};
 
 use core::mem::{self, MaybeUninit};
@@ -6,6 +11,8 @@ use core::mem::{self, MaybeUninit};
 pub const HEADER_SIZE: usize = mem::size_of::<Entry>();
 
 /// An offset into the [`Buffer`], that is validated and known to be safe.
+///
+/// See [`EntryIter`] for details on the idea and necessity of this type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ValidatedOffset(usize);
 
@@ -187,13 +194,33 @@ impl<const N: usize> core::ops::IndexMut<ValidatedOffset> for Buffer<N> {
     }
 }
 
+/// An iterator over the allocation entries in a [`Buffer`].
+///
+/// This iterator does not yield [`Entry`]s directly but rather yields so-called
+/// [`ValidatedOffset`]s. Those can be used to access the entries in a mutable
+/// and immutable way via indexing (`buffer[offset]`). This design was chosen,
+/// since the naive way of an `EntryIter` and `EntryIterMut`, which yield
+/// `&Entry` and `&mut Entry` result in many borrowing issues.
+///
+/// One could make this iterator yield the offsets as plain `usize`s, but the
+/// newtype is a better solution: it allows to know, that the offset comes from
+/// a known place (this iterator, which knows, that there is an entry at that
+/// offset. If there were none, the iteration wouldn't be possible) and thus
+/// the indexing can become safe. This builds on the assumption, that nobody
+/// constructs an invalid `ValidatedOffset`.
 pub struct EntryIter<'buffer, const N: usize> {
+    /// The memory to iterate over.
+    ///
+    /// This must be in a valid state (starting with an entry at offset `0` and
+    /// headers after all entries until the end of the buffer) in order for the
+    /// iteration to succeed.
     buffer: &'buffer Buffer<N>,
+    /// The current offset into the buffer.
     offset: usize,
 }
 impl<'buffer, const N: usize> EntryIter<'buffer, N> {
     /// Create an entry iterator over the given [`Buffer`].
-    pub const fn new(buffer: &'buffer Buffer<N>) -> Self {
+    const fn new(buffer: &'buffer Buffer<N>) -> Self {
         Self { buffer, offset: 0 }
     }
 }
