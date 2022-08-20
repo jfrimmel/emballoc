@@ -228,15 +228,13 @@ impl<'buffer, const N: usize> Iterator for EntryIter<'buffer, N> {
     type Item = ValidatedOffset;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.offset + HEADER_SIZE < N {
+        (self.offset + HEADER_SIZE < N).then(|| {
             let offset = self.offset;
             // SAFETY: the buffer invariant (valid entries) have to be upheld
             let entry = unsafe { self.buffer.at(offset).assume_init_ref() };
             self.offset += entry.size() + HEADER_SIZE;
-            Some(ValidatedOffset(offset))
-        } else {
-            None
-        }
+            ValidatedOffset(offset)
+        })
     }
 }
 
