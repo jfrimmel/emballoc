@@ -154,6 +154,7 @@
 //! [alloc]: https://doc.rust-lang.org/alloc/index.html
 #![cfg_attr(not(test), no_std)]
 #![warn(unsafe_op_in_unsafe_fn)]
+#![warn(clippy::undocumented_unsafe_blocks)]
 
 mod raw_allocator;
 use raw_allocator::RawAllocator;
@@ -221,6 +222,10 @@ impl<const N: usize> Allocator<N> {
         unsafe { ptr.add(offset) }
     }
 }
+// SAFETY: the safety contracts of global allocator is a bit lengthy, but in
+// short: the implementation does not panic (at least on purpose, if it would,
+// there is a bug) and it actually adheres to the layout requirements (ensured
+// by tests).
 unsafe impl<const N: usize> GlobalAlloc for Allocator<N> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let align = layout.align();
@@ -239,6 +244,9 @@ unsafe impl<const N: usize> GlobalAlloc for Allocator<N> {
         // allocate a memory block and return the sufficiently aligned pointer
         // into that memory block.
         match self.raw.lock().alloc(size) {
+            // SAFETY: `align` is a power of two as by the contract of `Layout`.
+            // Furthermore the memory slice is enlarged (see above), so that the
+            // aligned pointer will still be in the same allocation.
             Some(memory) => unsafe { Self::align_to(ptr::addr_of_mut!(*memory).cast(), align) },
             None => ptr::null_mut(),
         }

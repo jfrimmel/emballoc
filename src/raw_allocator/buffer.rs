@@ -1,8 +1,18 @@
-use super::entry::Entry;
+//! Module providing the [`Buffer`] abstraction and its related types.
+//!
+//! This module tries to encapsulate all the low-level details on working with
+//! uninitialized heap memory, alignment into that buffer and reading/writing
+//! [`Entry`]s.
+use super::entry::{Entry, State};
 
 use core::mem::{self, MaybeUninit};
 
+/// The size of a single block header.
+pub const HEADER_SIZE: usize = mem::size_of::<Entry>();
+
 /// An offset into the [`Buffer`], that is validated and known to be safe.
+///
+/// See [`EntryIter`] for details on the idea and necessity of this type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ValidatedOffset(usize);
 
@@ -21,7 +31,7 @@ impl<const N: usize> Buffer<N> {
     /// `N < 4`.
     pub const fn new() -> Self {
         assert!(N >= 4, "buffer too small, use N >= 4");
-        let remaining_size = N - mem::size_of::<Entry>();
+        let remaining_size = N - HEADER_SIZE;
         let initial_entry = Entry::free(remaining_size).as_raw();
 
         // this is necessary, since there mut be always a valid first entry
@@ -51,7 +61,7 @@ impl<const N: usize> Buffer<N> {
     /// plus the 4 bytes after it would read past the end of the buffer.
     fn at(&self, offset: usize) -> &MaybeUninit<Entry> {
         assert!(offset % mem::align_of::<Entry>() == 0);
-        assert!(offset + mem::size_of::<Entry>() <= self.0.len());
+        assert!(offset + HEADER_SIZE <= self.0.len());
 
         // SAFETY: this operation is unsafe for multiple reasons: the alignment
         // has to be satisfied and the entry read must be in bound of the buffer
@@ -90,7 +100,7 @@ impl<const N: usize> Buffer<N> {
     /// plus the 4 bytes after it would read past the end of the buffer.
     fn at_mut(&mut self, offset: usize) -> &mut MaybeUninit<Entry> {
         assert!(offset % mem::align_of::<Entry>() == 0);
-        assert!(offset + mem::size_of::<Entry>() <= self.0.len());
+        assert!(offset + HEADER_SIZE <= self.0.len());
 
         // SAFETY: same as `at()`
         unsafe {
@@ -113,11 +123,9 @@ impl<const N: usize> Buffer<N> {
     /// This operation is safe, since the offset is validated. It returns the
     /// slice of the memory of the given entry.
     pub fn memory_of(&self, offset: ValidatedOffset) -> &[MaybeUninit<u8>] {
-        let offset = offset.0;
-        let entry = unsafe { self.at(offset).assume_init_ref() };
-        let size = entry.size();
+        let size = self[offset].size();
 
-        let offset = offset + mem::size_of::<Entry>();
+        let offset = offset.0 + HEADER_SIZE;
         &self.0[offset..offset + size]
     }
 
@@ -126,27 +134,47 @@ impl<const N: usize> Buffer<N> {
     /// This operation is safe, since the offset is validated. It returns the
     /// slice of the memory of the given entry.
     pub fn memory_of_mut(&mut self, offset: ValidatedOffset) -> &mut [MaybeUninit<u8>] {
-        let offset = offset.0;
-        let entry = unsafe { self.at(offset).assume_init_ref() };
-        let size = entry.size();
+        let size = self[offset].size();
 
-        let offset = offset + mem::size_of::<Entry>();
+        let offset = offset.0 + HEADER_SIZE;
         &mut self.0[offset..offset + size]
     }
 
-    /// Query the following entry, if there is a following entry.
+    /// Query the following free entry, if there is such an entry.
     ///
     /// This function takes a [`ValidatedOffset`] of one entry and tries to
-    /// obtain a mutable reference to the entry after it. If there is no entry
-    /// after it (because the given one is the last in the buffer) then `None`
-    /// is returned.
-    pub fn following_entry(&mut self, offset: ValidatedOffset) -> Option<&mut MaybeUninit<Entry>> {
-        let offset = offset.0;
-        let entry = unsafe { self.at(offset).assume_init_ref() };
-        let size = entry.size();
+    /// obtain the entry after it. If there is no entry after it (because the
+    /// given one is the last in the buffer) or if the entry following it is a
+    /// used one, then `None` is returned.
+    pub fn following_free_entry(&mut self, offset: ValidatedOffset) -> Option<Entry> {
+        let iter_starting_at_offset = EntryIter {
+            buffer: self,
+            offset: offset.0,
+        };
 
-        let offset = offset + size + mem::size_of::<Entry>();
-        (offset < N).then(|| self.at_mut(offset))
+        iter_starting_at_offset
+            .map(|offset| self[offset])
+            .nth(1)
+            .filter(|entry| entry.state() == State::Free)
+    }
+
+    /// Mark the given `Entry` as used and try to split it up.
+    ///
+    /// This function will mark the `Entry` at the given offset as "used". The
+    /// block therefore will be marked as allocated. If the block at the offset
+    /// is large enough, it will be split into the used part and a new free
+    /// `Entry`, which holds the remaining memory (except for the necessary
+    /// header space). If the entry is not large enough for splitting, than the
+    /// entry is simply converted to an used entry.
+    pub fn mark_as_used(&mut self, offset: ValidatedOffset, size: usize) {
+        let old_size = self[offset].size();
+        debug_assert!(old_size >= size);
+
+        self[offset] = Entry::used(size);
+        if let Some(remaining_size) = (old_size - size).checked_sub(HEADER_SIZE) {
+            self.at_mut(offset.0 + size + HEADER_SIZE)
+                .write(Entry::free(remaining_size));
+        }
     }
 }
 impl<const N: usize> core::ops::Index<ValidatedOffset> for Buffer<N> {
@@ -166,13 +194,33 @@ impl<const N: usize> core::ops::IndexMut<ValidatedOffset> for Buffer<N> {
     }
 }
 
+/// An iterator over the allocation entries in a [`Buffer`].
+///
+/// This iterator does not yield [`Entry`]s directly but rather yields so-called
+/// [`ValidatedOffset`]s. Those can be used to access the entries in a mutable
+/// and immutable way via indexing (`buffer[offset]`). This design was chosen,
+/// since the naive way of an `EntryIter` and `EntryIterMut`, which yield
+/// `&Entry` and `&mut Entry` result in many borrowing issues.
+///
+/// One could make this iterator yield the offsets as plain `usize`s, but the
+/// newtype is a better solution: it allows to know, that the offset comes from
+/// a known place (this iterator, which knows, that there is an entry at that
+/// offset. If there were none, the iteration wouldn't be possible) and thus
+/// the indexing can become safe. This builds on the assumption, that nobody
+/// constructs an invalid `ValidatedOffset`.
 pub struct EntryIter<'buffer, const N: usize> {
+    /// The memory to iterate over.
+    ///
+    /// This must be in a valid state (starting with an entry at offset `0` and
+    /// headers after all entries until the end of the buffer) in order for the
+    /// iteration to succeed.
     buffer: &'buffer Buffer<N>,
+    /// The current offset into the buffer.
     offset: usize,
 }
 impl<'buffer, const N: usize> EntryIter<'buffer, N> {
     /// Create an entry iterator over the given [`Buffer`].
-    pub const fn new(buffer: &'buffer Buffer<N>) -> Self {
+    const fn new(buffer: &'buffer Buffer<N>) -> Self {
         Self { buffer, offset: 0 }
     }
 }
@@ -180,15 +228,13 @@ impl<'buffer, const N: usize> Iterator for EntryIter<'buffer, N> {
     type Item = ValidatedOffset;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.offset + mem::size_of::<Entry>() < N {
+        (self.offset + HEADER_SIZE < N).then(|| {
             let offset = self.offset;
             // SAFETY: the buffer invariant (valid entries) have to be upheld
             let entry = unsafe { self.buffer.at(offset).assume_init_ref() };
-            self.offset += entry.size() + mem::size_of::<Entry>();
-            Some(ValidatedOffset(offset))
-        } else {
-            None
-        }
+            self.offset += entry.size() + HEADER_SIZE;
+            ValidatedOffset(offset)
+        })
     }
 }
 
@@ -233,19 +279,21 @@ mod tests {
     }
 
     #[test]
-    fn following_entry() {
-        let mut buffer = Buffer::<20>::new();
+    fn following_free_entry() {
+        let mut buffer = Buffer::<24>::new();
         buffer.at_mut(0).write(Entry::used(4));
-        buffer.at_mut(8).write(Entry::used(8));
+        buffer.at_mut(8).write(Entry::used(4));
+        buffer.at_mut(16).write(Entry::free(4));
 
-        let entry = unsafe {
-            buffer
-                .following_entry(ValidatedOffset(0))
-                .unwrap()
-                .assume_init()
-        };
-        assert_eq!(entry, Entry::used(8));
-        assert!(buffer.following_entry(ValidatedOffset(8)).is_none());
+        // if the entry is followed by a free block, return that block
+        assert_eq!(
+            buffer.following_free_entry(ValidatedOffset(8)),
+            Some(Entry::free(4))
+        );
+        // if the entry is followed by a used block, return None
+        assert_eq!(buffer.following_free_entry(ValidatedOffset(0)), None);
+        // if the entry is not followed by any block, return None
+        assert_eq!(buffer.following_free_entry(ValidatedOffset(16)), None);
     }
 
     #[test]
@@ -258,5 +306,34 @@ mod tests {
         let expected = &buffer.0[4..8];
         let actual = buffer.memory_of(ValidatedOffset(0));
         assert_eq!(ptr::addr_of!(expected[0]), ptr::addr_of!(actual[0]));
+    }
+
+    #[test]
+    fn mark_used_without_split() {
+        let mut buffer = Buffer::<24>::new();
+        buffer.at_mut(0).write(Entry::used(4));
+        buffer.at_mut(8).write(Entry::free(4));
+        buffer.at_mut(16).write(Entry::used(4));
+
+        // the entry to be marked as used has exactly the requested size. There-
+        // fore no splitting might happen
+        buffer.mark_as_used(ValidatedOffset(8), 4);
+        assert_eq!(buffer[ValidatedOffset(0)], Entry::used(4));
+        assert_eq!(buffer[ValidatedOffset(8)], Entry::used(4)); // <--
+        assert_eq!(buffer[ValidatedOffset(16)], Entry::used(4));
+    }
+
+    #[test]
+    fn mark_used_with_split() {
+        let mut buffer = Buffer::<32>::new();
+        buffer.at_mut(0).write(Entry::used(4));
+        buffer.at_mut(8).write(Entry::free(20));
+
+        // the entry to be marked as used is large enough to be splitted. There-
+        // fore there must be a used and a free block after the call.
+        buffer.mark_as_used(ValidatedOffset(8), 4);
+        assert_eq!(buffer[ValidatedOffset(0)], Entry::used(4));
+        assert_eq!(buffer[ValidatedOffset(8)], Entry::used(4)); // <--
+        assert_eq!(buffer[ValidatedOffset(16)], Entry::free(12)); // <--
     }
 }

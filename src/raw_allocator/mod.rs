@@ -4,9 +4,11 @@
 //! size but does not need to worry about alignment.
 mod buffer;
 mod entry;
+
+use buffer::HEADER_SIZE;
 use entry::{Entry, State};
 
-use core::mem::{self, MaybeUninit};
+use core::mem::MaybeUninit;
 
 /// An error occurred when calling `free()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +29,7 @@ pub enum FreeError {
 ///
 /// Note, that the allocated memory is always aligned to `4`.
 pub struct RawAllocator<const N: usize> {
+    /// The internal buffer abstracting over the raw bytes of the heap.
     buffer: buffer::Buffer<N>,
 }
 impl<const N: usize> RawAllocator<N> {
@@ -51,8 +54,6 @@ impl<const N: usize> RawAllocator<N> {
     ///
     /// If the allocation fails, `None` will be returned.
     pub fn alloc(&mut self, n: usize) -> Option<&mut [MaybeUninit<u8>]> {
-        const HEADER_SIZE: usize = mem::size_of::<Entry>();
-
         // round up `n` to next multiple of `size_of::<Entry>()`
         let n = (n + HEADER_SIZE - 1) / HEADER_SIZE * HEADER_SIZE;
 
@@ -65,13 +66,7 @@ impl<const N: usize> RawAllocator<N> {
             .min_by_key(|(_offset, entry)| entry.size())?;
 
         // if the found block is large enough, split it into a used and a free
-        let entry_size = self.buffer[offset].size();
-        self.buffer[offset] = Entry::used(n);
-        if entry_size - n > HEADER_SIZE {
-            if let Some(following) = self.buffer.following_entry(offset) {
-                following.write(Entry::free(entry_size - n - HEADER_SIZE));
-            }
-        }
+        self.buffer.mark_as_used(offset, n);
         Some(self.buffer.memory_of_mut(offset))
     }
 
@@ -116,10 +111,8 @@ impl<const N: usize> RawAllocator<N> {
         }
         let additional_memory = self
             .buffer
-            .following_entry(offset)
-            .map(|entry| unsafe { entry.assume_init_ref() })
-            .filter(|entry| entry.state() == State::Free)
-            .map_or(0, |entry| entry.size() + mem::size_of::<Entry>());
+            .following_free_entry(offset)
+            .map_or(0, |entry| entry.size() + HEADER_SIZE);
         self.buffer[offset] = Entry::free(entry.size() + additional_memory);
         Ok(())
     }
