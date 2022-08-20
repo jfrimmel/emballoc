@@ -67,8 +67,10 @@ impl<const N: usize> RawAllocator<N> {
         // if the found block is large enough, split it into a used and a free
         let entry_size = self.buffer[offset].size();
         self.buffer[offset] = Entry::used(n);
-        if let Some(following) = self.buffer.following_entry(offset) {
-            following.write(Entry::free(entry_size - n - HEADER_SIZE));
+        if entry_size - n > HEADER_SIZE {
+            if let Some(following) = self.buffer.following_entry(offset) {
+                following.write(Entry::free(entry_size - n - HEADER_SIZE));
+            }
         }
         Some(self.buffer.memory_of_mut(offset))
     }
@@ -306,5 +308,35 @@ mod tests {
 
         // therefore there must be two free blocks
         assert_allocations!(allocator, Entry::free(4), Entry::free(4));
+    }
+
+    #[test]
+    fn alloc_impossible_splitting() {
+        let mut allocator = RawAllocator::<32>::new();
+        let _ptr1 = address!(allocator.alloc(4).unwrap());
+        let ptr2 = address!(allocator.alloc(12).unwrap());
+        let _ptr3 = address!(allocator.alloc(4).unwrap());
+        allocator.free(ptr2).unwrap();
+        assert_allocations!(allocator, Entry::used(4), Entry::free(12), Entry::used(4));
+
+        // new we've set up the heap such there is a free block of 12 in the
+        // middle (and no free data at the end). If one acquires a block of size
+        // 4 everything should work fine and the free block should be split up.;
+        let ptr4 = address!(allocator.alloc(4).unwrap());
+        assert_allocations!(
+            allocator,
+            Entry::used(4),
+            Entry::used(4),
+            Entry::free(4),
+            Entry::used(4)
+        );
+        allocator.free(ptr4).unwrap();
+        assert_allocations!(allocator, Entry::used(4), Entry::free(12), Entry::used(4));
+
+        // now the previous state is restored. If there is an allocation for a
+        // size of 12, no splitting must be happening, since the block is only
+        // 12 bytes of size, so splitting would tamper the following block.
+        let _ptr5 = address!(allocator.alloc(12).unwrap());
+        assert_allocations!(allocator, Entry::used(4), Entry::used(12), Entry::used(4));
     }
 }
