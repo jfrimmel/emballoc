@@ -1,4 +1,4 @@
-use super::entry::Entry;
+use super::entry::{Entry, State};
 
 use core::mem::{self, MaybeUninit};
 
@@ -134,17 +134,41 @@ impl<const N: usize> Buffer<N> {
         &mut self.0[offset..offset + size]
     }
 
-    /// Query the following entry, if there is a following entry.
+    /// Query the following free entry, if there is such an entry.
     ///
     /// This function takes a [`ValidatedOffset`] of one entry and tries to
-    /// obtain a mutable reference to the entry after it. If there is no entry
-    /// after it (because the given one is the last in the buffer) then `None`
-    /// is returned.
-    pub fn following_entry(&mut self, offset: ValidatedOffset) -> Option<&mut MaybeUninit<Entry>> {
-        let size = self[offset].size();
+    /// obtain the entry after it. If there is no entry after it (because the
+    /// given one is the last in the buffer) or if the entry following it is a
+    /// used one, then `None` is returned.
+    pub fn following_free_entry(&mut self, offset: ValidatedOffset) -> Option<Entry> {
+        let iter_starting_at_offset = EntryIter {
+            buffer: self,
+            offset: offset.0,
+        };
 
-        let offset = offset.0 + size + mem::size_of::<Entry>();
-        (offset < N).then(|| self.at_mut(offset))
+        iter_starting_at_offset
+            .map(|offset| self[offset])
+            .nth(1)
+            .filter(|entry| entry.state() == State::Free)
+    }
+
+    /// Mark the given `Entry` as used and try to split it up.
+    ///
+    /// This function will mark the `Entry` at the given offset as "used". The
+    /// block therefore will be marked as allocated. If the block at the offset
+    /// is large enough, it will be split into the used part and a new free
+    /// `Entry`, which holds the remaining memory (except for the necessary
+    /// header space). If the entry is not large enough for splitting, than the
+    /// entry is simply converted to an used entry.
+    pub fn mark_as_used(&mut self, offset: ValidatedOffset, size: usize) {
+        let old_size = self[offset].size();
+        debug_assert!(old_size >= size);
+
+        self[offset] = Entry::used(size);
+        if let Some(remaining_size) = (old_size - size).checked_sub(mem::size_of::<Entry>()) {
+            self.at_mut(offset.0 + size + mem::size_of::<Entry>())
+                .write(Entry::free(remaining_size));
+        }
     }
 }
 impl<const N: usize> core::ops::Index<ValidatedOffset> for Buffer<N> {
@@ -231,19 +255,21 @@ mod tests {
     }
 
     #[test]
-    fn following_entry() {
-        let mut buffer = Buffer::<20>::new();
+    fn following_free_entry() {
+        let mut buffer = Buffer::<24>::new();
         buffer.at_mut(0).write(Entry::used(4));
-        buffer.at_mut(8).write(Entry::used(8));
+        buffer.at_mut(8).write(Entry::used(4));
+        buffer.at_mut(16).write(Entry::free(4));
 
-        let entry = unsafe {
-            buffer
-                .following_entry(ValidatedOffset(0))
-                .unwrap()
-                .assume_init()
-        };
-        assert_eq!(entry, Entry::used(8));
-        assert!(buffer.following_entry(ValidatedOffset(8)).is_none());
+        // if the entry is followed by a free block, return that block
+        assert_eq!(
+            buffer.following_free_entry(ValidatedOffset(8)),
+            Some(Entry::free(4))
+        );
+        // if the entry is followed by a used block, return None
+        assert_eq!(buffer.following_free_entry(ValidatedOffset(0)), None);
+        // if the entry is not followed by any block, return None
+        assert_eq!(buffer.following_free_entry(ValidatedOffset(16)), None);
     }
 
     #[test]
@@ -256,5 +282,34 @@ mod tests {
         let expected = &buffer.0[4..8];
         let actual = buffer.memory_of(ValidatedOffset(0));
         assert_eq!(ptr::addr_of!(expected[0]), ptr::addr_of!(actual[0]));
+    }
+
+    #[test]
+    fn mark_used_without_split() {
+        let mut buffer = Buffer::<24>::new();
+        buffer.at_mut(0).write(Entry::used(4));
+        buffer.at_mut(8).write(Entry::free(4));
+        buffer.at_mut(16).write(Entry::used(4));
+
+        // the entry to be marked as used has exactly the requested size. There-
+        // fore no splitting might happen
+        buffer.mark_as_used(ValidatedOffset(8), 4);
+        assert_eq!(buffer[ValidatedOffset(0)], Entry::used(4));
+        assert_eq!(buffer[ValidatedOffset(8)], Entry::used(4)); // <--
+        assert_eq!(buffer[ValidatedOffset(16)], Entry::used(4));
+    }
+
+    #[test]
+    fn mark_used_with_split() {
+        let mut buffer = Buffer::<32>::new();
+        buffer.at_mut(0).write(Entry::used(4));
+        buffer.at_mut(8).write(Entry::free(20));
+
+        // the entry to be marked as used is large enough to be splitted. There-
+        // fore there must be a used and a free block after the call.
+        buffer.mark_as_used(ValidatedOffset(8), 4);
+        assert_eq!(buffer[ValidatedOffset(0)], Entry::used(4));
+        assert_eq!(buffer[ValidatedOffset(8)], Entry::used(4)); // <--
+        assert_eq!(buffer[ValidatedOffset(16)], Entry::free(12)); // <--
     }
 }

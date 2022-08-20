@@ -65,13 +65,7 @@ impl<const N: usize> RawAllocator<N> {
             .min_by_key(|(_offset, entry)| entry.size())?;
 
         // if the found block is large enough, split it into a used and a free
-        let entry_size = self.buffer[offset].size();
-        self.buffer[offset] = Entry::used(n);
-        if entry_size - n > HEADER_SIZE {
-            if let Some(following) = self.buffer.following_entry(offset) {
-                following.write(Entry::free(entry_size - n - HEADER_SIZE));
-            }
-        }
+        self.buffer.mark_as_used(offset, n);
         Some(self.buffer.memory_of_mut(offset))
     }
 
@@ -116,9 +110,7 @@ impl<const N: usize> RawAllocator<N> {
         }
         let additional_memory = self
             .buffer
-            .following_entry(offset)
-            .map(|entry| unsafe { entry.assume_init_ref() })
-            .filter(|entry| entry.state() == State::Free)
+            .following_free_entry(offset)
             .map_or(0, |entry| entry.size() + mem::size_of::<Entry>());
         self.buffer[offset] = Entry::free(entry.size() + additional_memory);
         Ok(())
