@@ -2,6 +2,9 @@ use super::entry::{Entry, State};
 
 use core::mem::{self, MaybeUninit};
 
+/// The size of a single block header.
+pub const HEADER_SIZE: usize = mem::size_of::<Entry>();
+
 /// An offset into the [`Buffer`], that is validated and known to be safe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ValidatedOffset(usize);
@@ -21,7 +24,7 @@ impl<const N: usize> Buffer<N> {
     /// `N < 4`.
     pub const fn new() -> Self {
         assert!(N >= 4, "buffer too small, use N >= 4");
-        let remaining_size = N - mem::size_of::<Entry>();
+        let remaining_size = N - HEADER_SIZE;
         let initial_entry = Entry::free(remaining_size).as_raw();
 
         // this is necessary, since there mut be always a valid first entry
@@ -51,7 +54,7 @@ impl<const N: usize> Buffer<N> {
     /// plus the 4 bytes after it would read past the end of the buffer.
     fn at(&self, offset: usize) -> &MaybeUninit<Entry> {
         assert!(offset % mem::align_of::<Entry>() == 0);
-        assert!(offset + mem::size_of::<Entry>() <= self.0.len());
+        assert!(offset + HEADER_SIZE <= self.0.len());
 
         // SAFETY: this operation is unsafe for multiple reasons: the alignment
         // has to be satisfied and the entry read must be in bound of the buffer
@@ -90,7 +93,7 @@ impl<const N: usize> Buffer<N> {
     /// plus the 4 bytes after it would read past the end of the buffer.
     fn at_mut(&mut self, offset: usize) -> &mut MaybeUninit<Entry> {
         assert!(offset % mem::align_of::<Entry>() == 0);
-        assert!(offset + mem::size_of::<Entry>() <= self.0.len());
+        assert!(offset + HEADER_SIZE <= self.0.len());
 
         // SAFETY: same as `at()`
         unsafe {
@@ -117,7 +120,7 @@ impl<const N: usize> Buffer<N> {
         let entry = unsafe { self.at(offset).assume_init_ref() };
         let size = entry.size();
 
-        let offset = offset + mem::size_of::<Entry>();
+        let offset = offset + HEADER_SIZE;
         &self.0[offset..offset + size]
     }
 
@@ -130,7 +133,7 @@ impl<const N: usize> Buffer<N> {
         let entry = unsafe { self.at(offset).assume_init_ref() };
         let size = entry.size();
 
-        let offset = offset + mem::size_of::<Entry>();
+        let offset = offset + HEADER_SIZE;
         &mut self.0[offset..offset + size]
     }
 
@@ -165,8 +168,8 @@ impl<const N: usize> Buffer<N> {
         debug_assert!(old_size >= size);
 
         self[offset] = Entry::used(size);
-        if let Some(remaining_size) = (old_size - size).checked_sub(mem::size_of::<Entry>()) {
-            self.at_mut(offset.0 + size + mem::size_of::<Entry>())
+        if let Some(remaining_size) = (old_size - size).checked_sub(HEADER_SIZE) {
+            self.at_mut(offset.0 + size + HEADER_SIZE)
                 .write(Entry::free(remaining_size));
         }
     }
@@ -202,11 +205,11 @@ impl<'buffer, const N: usize> Iterator for EntryIter<'buffer, N> {
     type Item = ValidatedOffset;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.offset + mem::size_of::<Entry>() < N {
+        if self.offset + HEADER_SIZE < N {
             let offset = self.offset;
             // SAFETY: the buffer invariant (valid entries) have to be upheld
             let entry = unsafe { self.buffer.at(offset).assume_init_ref() };
-            self.offset += entry.size() + mem::size_of::<Entry>();
+            self.offset += entry.size() + HEADER_SIZE;
             Some(ValidatedOffset(offset))
         } else {
             None

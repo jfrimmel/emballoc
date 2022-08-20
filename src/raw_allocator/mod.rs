@@ -4,9 +4,11 @@
 //! size but does not need to worry about alignment.
 mod buffer;
 mod entry;
+
+use buffer::HEADER_SIZE;
 use entry::{Entry, State};
 
-use core::mem::{self, MaybeUninit};
+use core::mem::MaybeUninit;
 
 /// An error occurred when calling `free()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,8 +53,6 @@ impl<const N: usize> RawAllocator<N> {
     ///
     /// If the allocation fails, `None` will be returned.
     pub fn alloc(&mut self, n: usize) -> Option<&mut [MaybeUninit<u8>]> {
-        const HEADER_SIZE: usize = mem::size_of::<Entry>();
-
         // round up `n` to next multiple of `size_of::<Entry>()`
         let n = (n + HEADER_SIZE - 1) / HEADER_SIZE * HEADER_SIZE;
 
@@ -111,7 +111,7 @@ impl<const N: usize> RawAllocator<N> {
         let additional_memory = self
             .buffer
             .following_free_entry(offset)
-            .map_or(0, |entry| entry.size() + mem::size_of::<Entry>());
+            .map_or(0, |entry| entry.size() + HEADER_SIZE);
         self.buffer[offset] = Entry::free(entry.size() + additional_memory);
         Ok(())
     }
