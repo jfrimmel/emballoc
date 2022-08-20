@@ -116,11 +116,9 @@ impl<const N: usize> Buffer<N> {
     /// This operation is safe, since the offset is validated. It returns the
     /// slice of the memory of the given entry.
     pub fn memory_of(&self, offset: ValidatedOffset) -> &[MaybeUninit<u8>] {
-        let offset = offset.0;
-        let entry = unsafe { self.at(offset).assume_init_ref() };
-        let size = entry.size();
+        let size = self[offset].size();
 
-        let offset = offset + HEADER_SIZE;
+        let offset = offset.0 + HEADER_SIZE;
         &self.0[offset..offset + size]
     }
 
@@ -129,11 +127,9 @@ impl<const N: usize> Buffer<N> {
     /// This operation is safe, since the offset is validated. It returns the
     /// slice of the memory of the given entry.
     pub fn memory_of_mut(&mut self, offset: ValidatedOffset) -> &mut [MaybeUninit<u8>] {
-        let offset = offset.0;
-        let entry = unsafe { self.at(offset).assume_init_ref() };
-        let size = entry.size();
+        let size = self[offset].size();
 
-        let offset = offset + HEADER_SIZE;
+        let offset = offset.0 + HEADER_SIZE;
         &mut self.0[offset..offset + size]
     }
 
