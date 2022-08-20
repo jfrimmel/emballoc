@@ -12,7 +12,7 @@
 //! The usage is simple: just copy and paste the following code snipped into
 //! your binary crate and potentially adjust the number of bytes of the heap
 //! (here 4K):
-//! ```no_run
+//! ```
 //! #[global_allocator]
 //! static ALLOCATOR: emballoc::Allocator<4096> = emballoc::Allocator::new();
 //!
@@ -20,7 +20,7 @@
 //! ```
 //! Afterwards you don't need to interact with the crate or the variable
 //! `ALLOCATOR` anymore. Now you can just `use alloc::vec::Vec` or even
-//! `use alloc::collections::HashMap`, i.e. every fancy collection which is
+//! `use alloc::collections::BTreeMap`, i.e. every fancy collection which is
 //! normally provided by the `std`.
 //!
 //! The minimal buffer size is `8`, which would allow exactly one allocation of

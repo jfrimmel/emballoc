@@ -32,5 +32,5 @@ static ALLOCATOR: emballoc::Allocator<4096> = emballoc::Allocator::new();
 extern crate alloc;
 ```
 
-Now the crate can use the `std` collections such as `Vec<T>`, `HashMap<K, V>`, etc. together with important types like `Box<T>` and `Rc<T>`.
+Now the crate can use the `std` collections such as `Vec<T>`, `BTreeMap<K, V>`, etc. together with important types like `Box<T>` and `Rc<T>`.
 Note, that things in the `std`-prelude (e.g. `Vec<T>`, `Box<T>`, ...) have to be imported explicitly.
