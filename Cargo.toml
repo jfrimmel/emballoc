@@ -7,6 +7,7 @@ categories = ["memory-management", "allocator", "no-std", "embedded"]
 keywords = ["allocator", "embedded", "no-std", "no_std"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/jfrimmel/emballoc"
+documentation = "https://docs.rs/emballoc"
 rust-version = "1.62"
 
 [package.metadata.docs.rs]
