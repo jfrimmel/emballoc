@@ -189,6 +189,8 @@
 //!     lets the user decide, whether that feature is necessary or not.
 //!
 //! [alloc]: https://doc.rust-lang.org/alloc/index.html
+//! [gist_hosted-test]: https://gist.github.com/jfrimmel/61943f9879adfbe760a78efa17a0ecaa
+//! [`Cell<T>`]: core::cell::Cell
 #![cfg_attr(not(test), no_std)]
 #![warn(unsafe_op_in_unsafe_fn)]
 #![warn(clippy::undocumented_unsafe_blocks)]
