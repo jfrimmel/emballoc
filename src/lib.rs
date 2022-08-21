@@ -5,8 +5,7 @@
 //! [`alloc`-crate][alloc] on `#![no_std]`-targets. The allocator provided in
 //! this crate is relatively simple, but reliable: its design is simple, so that
 //! errors in the implementation are unlikely. Furthermore the crate is tested
-//! by (unit) tests running under `miri`, so there shouldn't be any undefined
-//! behavior.
+//! rigorously (see below).
 //!
 //! # Usage
 //! The usage is simple: just copy and paste the following code snipped into
@@ -28,6 +27,31 @@
 //! case calculation and potentially adding some backup space of 10% (for
 //! example).
 //!
+//! The allocator itself is thread-safe, as there is no potentially unsafe
+//! [`Cell<T>`]-action done in this crate. Instead it uses the popular [`spin`]
+//! crate to use a simple lock on the internal data structures. While this is
+//! simple for the implementation, this is not good for performance on
+//! multi-threaded systems: you have a global lock for each memory allocation,
+//! so only on thread can do a memory allocation at a time. However, this isn't
+//! really a problem in embedded systems anyway, as there is only on thread
+//! possible without RTOSes (which in turn often provide a memory allocator as
+//! well, so that one can be used). Therefore this crate is __sound__ and safe
+//! to use in multi-threaded contexts, but the performance is not as good as it
+//! might be on a lock-free implementation (converting this crate to such a lock
+//! free version would be possible, but likely complicate the algorithm and thus
+//! is incompatible with the goal to be "simple").
+//!
+//! A general problem with non-lock-free allocators is the following: it can
+//! cause deadlocks even in single-threaded environments if there are interrupts
+//! that will _allocate memory_. The interrupt is kind of a second thread, that
+//! preempts the first one at any time, even if an allocation is currently in
+//! progress. In such a case the interrupt would wait on the lock and never
+//! obtain it, since the main program is interrupted and thus cannot release the
+//! lock. Therefore it is advised to never use any allocations (or deallocations
+//! to the same extend) in an interrupt handler. Performance-wise this shouldn't
+//! be done anyway.
+//!
+//! # Advanced embedded features
 //! Note to users with things like `MPU`s, `MMU`s, etc.: your device might
 //! support things like memory remapping or memory protection with setting
 //! read/write/execution rights. This crate _doesn't use_ those features at all!
@@ -36,6 +60,19 @@
 //! fully-working MMU: it is recommended, that you use an allocator, that
 //! actually supports paging, etc. This crate might still be helpful, e.g.
 //! before setting up the MMU.
+//!
+//! # Testing
+//! As mentioned before: an allocator is a very critical part in the overall
+//! system; a misbehaving allocator can break the whole program. Therefore this
+//! create is tested extensively:
+//! - there are unit tests and integration tests
+//! - the unit tests are run under `miri` to detect undefined behavior, both on
+//!   a little-endian and big-endian system
+//! - a real-world test using the allocator in the popular `ripgrep` program was
+//!   done (see [here][gist_hosted-test])
+//!
+//! Note, that the test coverage is not yet high enough and work is done to
+//! increase it.
 //!
 //! # Implementation
 //! This algorithm does a linear scan for free blocks. The basic algorithm is as
