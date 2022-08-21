@@ -35,5 +35,30 @@ extern crate alloc;
 Now the crate can use the `std` collections such as `Vec<T>`, `BTreeMap<K, V>`, etc. together with important types like `Box<T>` and `Rc<T>`.
 Note, that things in the `std`-prelude (e.g. `Vec<T>`, `Box<T>`, ...) have to be imported explicitly.
 
+# Why choosing this crate
+
+This crate started as part of an embedded project, but was extracted to make it usable in other projects and for other users.
+This sections answers the question:
+
+> Why should you consider using this crate in your project?
+
+- the core algorithm is _simple_ and thus implementation errors are less likely
+- rigorous testing is done (see [here][docu-testing])
+- crate is free of undefined behavior according to `miri`
+- it is used in real-world applications
+- it even works on a PC (see [here][gist_hosted-test]), although that is not the primary use case
+
+I'm glad, if that convinced you, but if you have any questions simply [open an issue](https://github.com/jfrimmel/emballoc/issues/new/choose).
+
+A note to users on systems with advanced memory features like MMUs and MPUs:
+
+- if you have an _memory protection unit_ (MPU) or similar available, you have to configure it yourself as this crate is platform-agnostic.
+  An example usage might be to configure it, that reading from and writing to the heap is allowed, but execution is not.
+  It is not possible to surround the heap with guard pages, as this allocator will never read/write outside of the internal byte array.
+  However it might be advised to guard the stack, so that it doesn't grow into the heap (or any other variable).
+- if you have an (active) _memory management unit_ (MMU), this is likely not the crate for you: it doesn't use any of the important features, which makes it perform much worse than possible.
+  Use a proper memory allocator for that use case (one that supports paging, etc.).
+  However, if you need dynamic memory before enabling the MMU, this crate certainly is an option.
+
 [docu-testing]: https://docs.rs/emballoc/latest/emballoc/#testing
 [gist_hosted-test]: https://gist.github.com/jfrimmel/61943f9879adfbe760a78efa17a0ecaa
