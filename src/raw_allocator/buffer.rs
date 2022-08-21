@@ -30,7 +30,8 @@ impl<const N: usize> Buffer<N> {
     /// This function panics if the buffer is less than 4 bytes in size, i.e. if
     /// `N < 4`.
     pub const fn new() -> Self {
-        assert!(N >= 4, "buffer too small, use N >= 4");
+        assert!(N >= HEADER_SIZE, "buffer too small, use N >= 4");
+        assert!(N % HEADER_SIZE == 0, "memory size has to be divisible by 4");
         let remaining_size = N - HEADER_SIZE;
         let initial_entry = Entry::free(remaining_size).as_raw();
 
@@ -240,7 +241,24 @@ impl<'buffer, const N: usize> Iterator for EntryIter<'buffer, N> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Buffer, Entry, ValidatedOffset};
+    use super::{Buffer, Entry, ValidatedOffset, HEADER_SIZE};
+
+    #[test]
+    fn validated_offset_debug() {
+        assert_eq!(format!("{:?}", ValidatedOffset(12)), "ValidatedOffset(12)");
+    }
+
+    #[test]
+    fn validated_offset_equality() {
+        assert_eq!(ValidatedOffset(12), ValidatedOffset(12));
+        assert_ne!(ValidatedOffset(12), ValidatedOffset(24));
+        // as this test is primarily to make the code coverage happy, let's test
+        // something else here: cloning. Since the type is `Copy`, it has to be
+        // `Clone` as well, despite `clone()` never being called. So let's do it
+        // here, so that the coverage testing is happy.
+        assert_eq!(ValidatedOffset(12).clone(), ValidatedOffset(12));
+        assert_ne!(ValidatedOffset(12).clone(), ValidatedOffset(24));
+    }
 
     #[test]
     fn empty_allocator() {
@@ -248,6 +266,30 @@ mod tests {
         let expected = Entry::free(32 - 4);
         let actual = unsafe { buffer.at(0).assume_init() };
         assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn header_size() {
+        // the codebase assumes, that the header size is `4`, so make sure that
+        // assumption holds.
+        assert_eq!(HEADER_SIZE, 4);
+    }
+
+    #[test]
+    #[should_panic(expected = "buffer too small")]
+    fn too_small_buffer() {
+        // this test ensures, that there is no out of bounds writing when
+        // setting up the initial entry
+        Buffer::<3>::new();
+    }
+
+    #[test]
+    #[should_panic(expected = "memory size has to be divisible by 4")]
+    fn invalid_buffer_size() {
+        // the buffer size is not really an issue here, but the code is easier
+        // to write/read if the buffer size is always a multiple of the header
+        // size, i.e. the size of an entry, which is `4`.
+        Buffer::<13>::new();
     }
 
     #[test]
@@ -276,6 +318,34 @@ mod tests {
         assert_eq!(buffer[ValidatedOffset(8)], Entry::used(4));
         buffer[ValidatedOffset(8)] = Entry::free(12);
         assert_eq!(buffer[ValidatedOffset(8)], Entry::free(12));
+    }
+
+    #[test]
+    #[should_panic]
+    fn at_out_of_bounds() {
+        let buffer = Buffer::<32>::new();
+        buffer.at(64); // panic here
+    }
+
+    #[test]
+    #[should_panic]
+    fn at_mut_out_of_bounds() {
+        let mut buffer = Buffer::<32>::new();
+        buffer.at_mut(64); // panic here
+    }
+
+    #[test]
+    #[should_panic]
+    fn at_unaligned() {
+        let buffer = Buffer::<32>::new();
+        buffer.at(2); // panic here
+    }
+
+    #[test]
+    #[should_panic]
+    fn at_mut_unaligned() {
+        let mut buffer = Buffer::<32>::new();
+        buffer.at_mut(2); // panic here
     }
 
     #[test]

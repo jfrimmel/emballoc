@@ -64,15 +64,14 @@
 //! # Testing
 //! As mentioned before: an allocator is a very critical part in the overall
 //! system; a misbehaving allocator can break the whole program. Therefore this
-//! create is tested extensively:
+//! create is tested extensively[^note]:
 //! - there are unit tests and integration tests
 //! - the unit tests are run under `miri` to detect undefined behavior, both on
 //!   a little-endian and big-endian system
 //! - a real-world test using the allocator in the popular `ripgrep` program was
 //!   done (see [here][gist_hosted-test])
 //!
-//! Note, that the test coverage is not yet high enough and work is done to
-//! increase it.
+//! [^note]: The test coverage of different metrics and tools is over 96%.
 //!
 //! # Implementation
 //! This algorithm does a linear scan for free blocks. The basic algorithm is as
@@ -350,7 +349,7 @@ mod tests {
 
     #[test]
     fn small_alignments() {
-        let allocator = Allocator::<32>::new();
+        let allocator = Allocator::<128>::new();
 
         let ptr = unsafe { allocator.alloc(Layout::from_size_align(8, 2).unwrap()) };
         assert_alignment!(ptr, 1);
@@ -380,6 +379,24 @@ mod tests {
         let ptr = unsafe { ALLOCATOR.alloc(Layout::from_size_align(4, FOUR_MEG).unwrap()) };
 
         assert_alignment!(ptr, FOUR_MEG);
+    }
+
+    #[test]
+    fn allocation_failure() {
+        let allocator = Allocator::<128>::new();
+
+        // try an allocation, that exceeds the total memory size
+        let ptr = unsafe { allocator.alloc(Layout::from_size_align(129, 1).unwrap()) };
+        assert_eq!(ptr, ptr::null_mut());
+    }
+
+    #[test]
+    fn allocation_failure_due_to_alignment() {
+        let allocator = Allocator::<128>::new();
+
+        // try an allocation, that exceeds the total memory size
+        let ptr = unsafe { allocator.alloc(Layout::from_size_align(8, 128).unwrap()) };
+        assert_eq!(ptr, ptr::null_mut());
     }
 
     #[test]

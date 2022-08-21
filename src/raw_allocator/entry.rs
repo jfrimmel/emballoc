@@ -102,6 +102,18 @@ mod tests {
     use super::{Entry, State};
 
     #[test]
+    fn equality() {
+        assert_eq!(Entry::used(4), Entry::used(4));
+        assert_ne!(Entry::used(4), Entry::used(5));
+
+        assert_eq!(Entry::free(4), Entry::free(4));
+        assert_ne!(Entry::free(4), Entry::free(5));
+
+        assert_ne!(Entry::used(4), Entry::free(4));
+        assert_ne!(Entry::used(4), Entry::free(5));
+    }
+
+    #[test]
     fn entry_bitpacking_state() {
         assert_eq!(Entry::free(5).state(), State::Free);
         assert_eq!(Entry::used(5).state(), State::Used);
@@ -130,5 +142,17 @@ mod tests {
         // other parts of this crate might assume, that this type has the same
         // alignment as a `u32`, i.e. `4`
         assert_eq!(mem::align_of::<Entry>(), mem::align_of::<u32>());
+    }
+
+    #[test]
+    fn debug_representation() {
+        assert_eq!(
+            format!("{:?}", Entry::used(123)),
+            "Entry { state: Used, size: 123 }"
+        );
+        assert_eq!(
+            format!("{:?}", Entry::free(456)),
+            "Entry { state: Free, size: 456 }"
+        );
     }
 }
