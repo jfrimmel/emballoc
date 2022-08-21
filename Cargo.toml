@@ -1,7 +1,7 @@
 [package]
 name = "emballoc"
 description = "Embedded allocator for `#![no_std]`"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 categories = ["memory-management", "no-std", "embedded", "algorithms"]
 keywords = ["allocator", "embedded", "no-std", "no_std"]
