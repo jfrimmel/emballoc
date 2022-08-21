@@ -8,7 +8,7 @@ See the usage description below.
 An allocator is a rather critical part of a software project:
 when using dynamic memory many operations implicitly can or will allocate, sometimes unexpectedly.
 Therefore a misbehaving allocator can "randomly" crash the program in ver obscure ways.
-As such an allocator has to be well-tested and battle-proven.
+As such an allocator has to be well-tested and battle-proven (see more information [here][docu-testing] and a [real world example][gist_hosted-test]).
 Furthermore it has to be _simple_: the simpler the algorithm is, the more likely is a correct implementation.
 
 Refer to the [crate-documentation](https://docs.rs/emballoc/) for details on the algorithm and usage hints.
@@ -34,3 +34,6 @@ extern crate alloc;
 
 Now the crate can use the `std` collections such as `Vec<T>`, `BTreeMap<K, V>`, etc. together with important types like `Box<T>` and `Rc<T>`.
 Note, that things in the `std`-prelude (e.g. `Vec<T>`, `Box<T>`, ...) have to be imported explicitly.
+
+[docu-testing]: https://docs.rs/emballoc/latest/emballoc/#testing
+[gist_hosted-test]: https://gist.github.com/jfrimmel/61943f9879adfbe760a78efa17a0ecaa

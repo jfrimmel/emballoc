@@ -5,8 +5,7 @@
 //! [`alloc`-crate][alloc] on `#![no_std]`-targets. The allocator provided in
 //! this crate is relatively simple, but reliable: its design is simple, so that
 //! errors in the implementation are unlikely. Furthermore the crate is tested
-//! by (unit) tests running under `miri`, so there shouldn't be any undefined
-//! behavior.
+//! rigorously (see below).
 //!
 //! # Usage
 //! The usage is simple: just copy and paste the following code snipped into
@@ -36,6 +35,19 @@
 //! fully-working MMU: it is recommended, that you use an allocator, that
 //! actually supports paging, etc. This crate might still be helpful, e.g.
 //! before setting up the MMU.
+//!
+//! # Testing
+//! As mentioned before: an allocator is a very critical part in the overall
+//! system; a misbehaving allocator can break the whole program. Therefore this
+//! create is tested extensively:
+//! - there are unit tests and integration tests
+//! - the unit tests are run under `miri` to detect undefined behavior, both on
+//!   a little-endian and big-endian system
+//! - a real-world test using the allocator in the popular `ripgrep` program was
+//!   done (see [here][gist_hosted-test])
+//!
+//! Note, that the test coverage is not yet high enough and work is done to
+//! increase it.
 //!
 //! # Implementation
 //! This algorithm does a linear scan for free blocks. The basic algorithm is as
