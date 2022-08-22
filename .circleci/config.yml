@@ -59,8 +59,19 @@ jobs:
               ) \
               --use-color --ignore-filename-regex='/usr/local/cargo/registry' \
               --instr-profile=json5format.profdata
-      - codecov/upload:
-          file: json5format.profdata
+            # according to https://stackoverflow.com/a/50884416
+            llvm-cov export -format=lcov $( \
+                for file in $( \
+                    RUSTFLAGS="-C instrument-coverage" \
+                      cargo test --tests --no-run --message-format=json \
+                        | jq -r "select(.profile.test == true) | .filenames[]" \
+                        | grep -v dSYM - \
+                  ); \
+                do printf "%s %s " -object $file; done \
+              ) \
+              --ignore-filename-regex='/usr/local/cargo/registry' \
+              --instr-profile=json5format.profdata > coverage.lcov
+      - codecov/upload
 
   msrv:
     docker:
