@@ -34,12 +34,13 @@
 //! multi-threaded systems: you have a global lock for each memory allocation,
 //! so only on thread can do a memory allocation at a time. However, this isn't
 //! really a problem in embedded systems anyway, as there is only on thread
-//! possible without RTOSes (which in turn often provide a memory allocator as
-//! well, so that one can be used). Therefore this crate is __sound__ and safe
-//! to use in multi-threaded contexts, but the performance is not as good as it
-//! might be on a lock-free implementation (converting this crate to such a lock
-//! free version would be possible, but likely complicate the algorithm and thus
-//! is incompatible with the goal to be "simple").
+//! possible without Real Time Operating Systems (RTOS) (which in turn often
+//! provide a memory allocator as well, so that one can be used). Therefore this
+//! crate is __sound__ and safe to use in multi-threaded contexts, but the
+//! performance is not as good as it might be on a lock-free implementation
+//! (converting this crate to such a lock free version would be possible, but
+//! likely complicate the algorithm and thus is incompatible with the goal to be
+//! "simple").
 //!
 //! A general problem with non-lock-free allocators is the following: it can
 //! cause deadlocks even in single-threaded environments if there are interrupts
@@ -254,7 +255,7 @@ impl<const N: usize> Allocator<N> {
     unsafe fn align_to(ptr: *mut u8, align: usize) -> *mut u8 {
         let addr = ptr as usize;
         let mismatch = addr & (align - 1);
-        let offset = if mismatch != 0 { align - mismatch } else { 0 };
+        let offset = if mismatch == 0 { 0 } else { align - mismatch };
         // SAFETY: "in-bound"-requirement is part of the safety-contract of this
         // function, therefore the caller is responsible for it
         unsafe { ptr.add(offset) }

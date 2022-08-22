@@ -1,0 +1,95 @@
+version: 2.1
+
+jobs:
+  build:
+    docker:
+      - image: rust:latest
+    steps:
+      - checkout
+      - run:
+          name: Build the source
+          command: cargo build
+
+  test:
+    docker:
+      - image: rust:latest
+    steps:
+      - checkout
+      - run:
+          name: Run the tests
+          command: cargo test
+
+  miri:
+    parameters:
+      target:
+        type: string
+    docker:
+      - image: jfrimmel/miri:nightly-2022-08-22
+    steps:
+      - checkout
+      - run:
+          name: Run the tests
+          command: MIRIFLAGS='-Zmiri-symbolic-alignment-check' cargo miri test --target << parameters.target >> --lib
+
+  msrv:
+    docker:
+      - image: rust:1.62
+    steps:
+      - checkout
+      - run:
+          name: Build the source
+          command: cargo check
+
+  style:
+    docker:
+      - image: rust:latest
+    steps:
+      - checkout
+      - run:
+          name: Install linter and formatter
+          command: rustup component add rustfmt clippy
+      - run:
+          name: Check formatting
+          command: cargo fmt --check
+      - run:
+          name: Run linter
+          command: |
+            cargo clippy -- \
+              -D clippy::cargo \
+              -D clippy::complexity \
+              -D clippy::nursery \
+              -D clippy::pedantic \
+              -D clippy::perf \
+              -D clippy::style \
+              -D clippy::suspicious \
+              -F clippy::dbg_macro \
+              -F clippy::print_stdout \
+              -F clippy::print_stderr \
+              -F clippy::todo \
+              -F clippy::unimplemented \
+              -D clippy::undocumented_unsafe_blocks
+
+  doc:
+    docker:
+      - image: rust:latest
+    steps:
+      - checkout
+      - run:
+          name: Build the documentation
+          command: cargo doc
+
+workflows:
+  ci:
+    jobs:
+      - build
+      - test:
+          requires: [build]
+      - miri:
+          requires: [build]
+          matrix:
+            parameters:
+              target:
+                ["x86_64-unknown-linux-gnu", "mips64-unknown-linux-gnuabi64"]
+      - msrv
+      - style
+      - doc
