@@ -115,7 +115,7 @@ impl<const N: usize> Buffer<N> {
     }
 
     /// Iterate over all entries and obtain the [`ValidatedOffset`]s.
-    pub fn entries(&self) -> EntryIter<N> {
+    pub const fn entries(&self) -> EntryIter<N> {
         EntryIter::new(self)
     }
 
