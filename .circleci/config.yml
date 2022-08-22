@@ -1,5 +1,8 @@
 version: 2.1
 
+orbs:
+  codecov: codecov/codecov@3.2.3
+
 jobs:
   build:
     docker:
@@ -30,6 +33,34 @@ jobs:
       - run:
           name: Run the tests
           command: MIRIFLAGS='-Zmiri-symbolic-alignment-check' cargo miri test --target << parameters.target >> --lib
+
+  coverage:
+    docker:
+      - image: jfrimmel/coverage
+    steps:
+      - checkout
+      - run:
+          name: Record testing coverage
+          command: |
+            env \
+              RUSTFLAGS="-C instrument-coverage" \
+              LLVM_PROFILE_FILE="json5format-%m.profraw" \
+              cargo test
+            llvm-profdata merge -sparse json5format-*.profraw -o json5format.profdata
+            # according to https://doc.rust-lang.org/rustc/instrument-coverage.html#tips-for-listing-the-binaries-automatically
+            llvm-cov report $( \
+                for file in $( \
+                    RUSTFLAGS="-C instrument-coverage" \
+                      cargo test --tests --no-run --message-format=json \
+                        | jq -r "select(.profile.test == true) | .filenames[]" \
+                        | grep -v dSYM - \
+                  ); \
+                do printf "%s %s " -object $file; done \
+              ) \
+              --use-color --ignore-filename-regex='/usr/local/cargo/registry' \
+              --instr-profile=json5format.profdata
+      - codecov/upload:
+          file: json5format.profdata
 
   msrv:
     docker:
@@ -90,6 +121,8 @@ workflows:
             parameters:
               target:
                 ["x86_64-unknown-linux-gnu", "mips64-unknown-linux-gnuabi64"]
+      - coverage:
+          requires: [build]
       - msrv
       - style
       - doc
