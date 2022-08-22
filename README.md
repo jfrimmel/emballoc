@@ -73,5 +73,14 @@ This crate has a stability guarantee about the compiler version supported.
 The so-called minimum supported Rust version is currently set to **1.62** and won't be raised without a proper increase in the semantic version number scheme.
 This MSRV is specified in `Cargo.toml` and is tested in CI.
 
+# License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))
+
+at your option.
+
 [docu-testing]: https://docs.rs/emballoc/latest/emballoc/#testing
 [gist_hosted-test]: https://gist.github.com/jfrimmel/61943f9879adfbe760a78efa17a0ecaa
