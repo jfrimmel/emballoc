@@ -111,6 +111,16 @@ mod tests {
 
         assert_ne!(Entry::used(4), Entry::free(4));
         assert_ne!(Entry::used(4), Entry::free(5));
+
+        // now same with cloning
+        assert_eq!(Entry::used(4).clone(), Entry::used(4));
+        assert_ne!(Entry::used(4).clone(), Entry::used(5));
+
+        assert_eq!(Entry::free(4).clone(), Entry::free(4));
+        assert_ne!(Entry::free(4).clone(), Entry::free(5));
+
+        assert_ne!(Entry::used(4).clone(), Entry::free(4));
+        assert_ne!(Entry::used(4).clone(), Entry::free(5));
     }
 
     #[test]
@@ -125,6 +135,18 @@ mod tests {
         assert_eq!(Entry(0b10_1).state(), State::Used);
         assert_eq!(Entry(0b11_1).state(), State::Used);
         assert_eq!(Entry(0b11_0).state(), State::Free);
+
+        // now the same with cloning
+        assert_eq!(Entry::free(5).state().clone(), State::Free);
+        assert_eq!(Entry::used(5).state().clone(), State::Used);
+
+        assert_eq!(Entry(0b00_0).state().clone(), State::Free);
+        assert_eq!(Entry(0b00_1).state().clone(), State::Used);
+
+        assert_eq!(Entry(0b10_0).state().clone(), State::Free);
+        assert_eq!(Entry(0b10_1).state().clone(), State::Used);
+        assert_eq!(Entry(0b11_1).state().clone(), State::Used);
+        assert_eq!(Entry(0b11_0).state().clone(), State::Free);
     }
 
     #[test]
@@ -142,6 +164,24 @@ mod tests {
         // other parts of this crate might assume, that this type has the same
         // alignment as a `u32`, i.e. `4`
         assert_eq!(mem::align_of::<Entry>(), mem::align_of::<u32>());
+    }
+
+    #[test]
+    fn large_entries() {
+        Entry::free((1 << 31) - 4);
+        Entry::used((1 << 31) - 4);
+    }
+
+    #[test]
+    #[should_panic]
+    fn huge_free_block() {
+        Entry::free(1 << 31); // panic here
+    }
+
+    #[test]
+    #[should_panic]
+    fn huge_used_block() {
+        Entry::used(1 << 31); // panic here
     }
 
     #[test]
