@@ -1,6 +1,6 @@
 [package]
 name = "emballoc"
-description = "Embedded allocator for `#![no_std]`"
+description = "Simple but reliable memory allocator for embedded Rust and #![no_std]"
 version = "0.1.1"
 edition = "2021"
 categories = ["memory-management", "no-std", "embedded", "algorithms"]

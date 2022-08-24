@@ -1,6 +1,6 @@
-# Embedded memory allocator
+# `emballoc` — Embedded Memory Allocator
 
-[![crates.io](https://img.shields.io/crates/v/emballoc)](https://crates.io/crate/emballoc)
+[![crates.io](https://img.shields.io/crates/v/emballoc)](https://crates.io/crates/emballoc)
 [![circleci](https://img.shields.io/circleci/build/github/jfrimmel/emballoc)](https://app.circleci.com/pipelines/github/jfrimmel/emballoc)
 [![codecov](https://codecov.io/gh/jfrimmel/emballoc/branch/main/graph/badge.svg?token=XU4EG0HGRP)](https://codecov.io/gh/jfrimmel/emballoc)
 [![docs.rs](https://img.shields.io/docsrs/emballoc)](https://docs.rs/emballoc)
@@ -28,7 +28,7 @@ version = "*" # replace with current version from crates.io
 ```
 
 After that the usage is very simple: just copy the following code to the binary crate of the project.
-Substitute the `4096` with the desired heap size.
+Substitute the `4096` with the desired heap size in bytes.
 
 ```rust
 #[global_allocator]
@@ -50,6 +50,7 @@ This sections answers the question:
 - the core algorithm is _simple_ and thus implementation errors are less likely
 - rigorous testing is done (see [here][docu-testing])
 - crate is free of undefined behavior according to `miri`
+- statically determined heap size preventing growing the heap into the stack
 - it is used in real-world applications
 - it even works on a PC (see [here][gist_hosted-test]), although that is not the primary use case
 - supports the stable compiler as there are only stable features used

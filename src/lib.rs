@@ -22,10 +22,18 @@
 //! `use alloc::collections::BTreeMap`, i.e. every fancy collection which is
 //! normally provided by the `std`.
 //!
+//! Note, that the usable dynamic memory is less than the total heap size `N`
+//! due to the management of the individual allocations. Each allocation will
+//! require a constant memory overhead of _4 bytes_[^note-header-size]. This
+//! implies, that more allocations will result in less usable space in the heap.
 //! The minimal buffer size is `8`, which would allow exactly one allocation of
 //! size up to 4 at a time. Adjust the size as necessary, e.g. by doing a worst
 //! case calculation and potentially adding some backup space of 10% (for
 //! example).
+//!
+//! [^note-header-size]: this value is critical for worst-case calculations and
+//! therefore part of the stability guarantees of this crate. Changing it will
+//! be a breaking change and thus requires a major version bump.
 //!
 //! The allocator itself is thread-safe, as there is no potentially unsafe
 //! [`Cell<T>`]-action done in this crate. Instead it uses the popular [`spin`]
@@ -65,14 +73,21 @@
 //! # Testing
 //! As mentioned before: an allocator is a very critical part in the overall
 //! system; a misbehaving allocator can break the whole program. Therefore this
-//! create is tested extensively[^note]:
+//! create is tested extensively[^note-testing]:
 //! - there are unit tests and integration tests
 //! - the unit tests are run under `miri` to detect undefined behavior, both on
 //!   a little-endian and big-endian system
 //! - a real-world test using the allocator in the popular `ripgrep` program was
 //!   done (see [here][gist_hosted-test])
 //!
-//! [^note]: The test coverage of different metrics and tools is over 96%.
+//! [^note-testing]: The test coverage of different metrics and tools is over
+//! 96% (self-set lower limit for this crate). Typically, code coverage tends to
+//! vary between coverage measurement kinds (e.g. line/region coverage). One can
+//! refer to the latest [codecov.io][codecov] measurement or refer to the more
+//! precise measurements obtained by the Rust _instrumented coverage_ feature.
+//! Those can be found in the [CI-logs] (see the `coverage` job and there look
+//! at "Record testing coverage"). There is a table showing the percentages of
+//! different metrics per file.
 //!
 //! # Implementation
 //! This algorithm does a linear scan for free blocks. The basic algorithm is as
@@ -191,6 +206,8 @@
 //! [alloc]: https://doc.rust-lang.org/alloc/index.html
 //! [gist_hosted-test]: https://gist.github.com/jfrimmel/61943f9879adfbe760a78efa17a0ecaa
 //! [`Cell<T>`]: core::cell::Cell
+//! [codecov]: https://codecov.io/gh/jfrimmel/emballoc
+//! [ci-logs]: https://app.circleci.com/pipelines/github/jfrimmel/emballoc
 #![cfg_attr(not(test), no_std)]
 #![warn(unsafe_op_in_unsafe_fn)]
 #![warn(clippy::undocumented_unsafe_blocks)]
@@ -211,7 +228,7 @@ use core::ptr;
 /// but the heap cannot grow into the stack pointer.
 ///
 /// Its usage is simple: just copy and paste the following in the binary crate
-/// you're developing. The memory size of the heap is `4096` or 4K in this
+/// you're developing. The memory size of the heap is 4096 bytes (4K) in this
 /// example. Adjust that value to your needs.
 /// ```no_run
 /// #[global_allocator]
@@ -229,17 +246,44 @@ pub struct Allocator<const N: usize> {
     raw: spin::Mutex<RawAllocator<N>>,
 }
 impl<const N: usize> Allocator<N> {
-    /// Create a new [`Allocator`].
+    /// Create a new [`Allocator`] with exactly `N` bytes heap space.
+    ///
+    /// Note, that the usable size is less than the heap size, since there is
+    /// some bookkeeping-overhead stored in that area as well. Please see the
+    /// [crate-level](crate)-documentation for recommendations on the buffer
+    /// size and general usage.
     ///
     /// This function is a `const fn`, therefore you can call it directly when
     /// creating the allocator.
     ///
-    /// Please see the [crate-level](crate)-documentation for recommendations on
-    /// the buffer size and general usage.
+    /// # Example
+    /// Normally one would use a static variable to assign the result of this
+    /// function to. When using this, the size is specified in the type and
+    /// does not need to be repeated in the call to this function.
+    /// ```
+    /// static ALLOCATOR: emballoc::Allocator<4096> = emballoc::Allocator::new();
+    /// ```
+    /// Note: don't use a `const`, as this would freshly instantiate the
+    /// allocator every time used and dropping the allocation state.
+    ///
+    /// If the allocator is used locally, then the size has to be specified like
+    /// this:
+    /// ```
+    /// let allocator = emballoc::Allocator::<64>::new(); // note: smaller size!
+    /// ```
+    /// Be careful to use a smaller size, since this allocator will be created
+    /// on the stack! Therefore it is possible to easily blow up the stack, so
+    /// this usage is discouraged and only should be done in special cases.
     ///
     /// # Panics
-    /// This function will panic, if the supplied buffer size, i.e. `N` is less
+    /// This function will panic, if the supplied buffer size, i.e. `N`, is less
     /// than `8` or not divisible by `4`.
+    /// ```should_panic
+    /// emballoc::Allocator::<63>::new(); // not divisible by 4
+    /// ```
+    /// ```should_panic
+    /// emballoc::Allocator::<4>::new(); // less than 8
+    /// ```
     #[must_use = "assign the allocator to a static variable and apply the `#[global_allocator]`-attribute to make it the global allocator"]
     pub const fn new() -> Self {
         let raw = spin::Mutex::new(RawAllocator::new());
