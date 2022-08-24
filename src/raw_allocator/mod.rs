@@ -332,4 +332,22 @@ mod tests {
         let _ptr5 = address!(allocator.alloc(12).unwrap());
         assert_allocations!(allocator, Entry::used(4), Entry::used(12), Entry::used(4));
     }
+
+    #[test]
+    fn free_error_properties() {
+        // pointless and rather dumb test case: check, that the derived traits
+        // work as expected.
+        use super::FreeError::{AllocationNotFound, DoubleFreeDetected};
+
+        assert_eq!(AllocationNotFound, AllocationNotFound);
+        assert_eq!(DoubleFreeDetected, DoubleFreeDetected);
+        assert_ne!(AllocationNotFound, DoubleFreeDetected);
+
+        assert_eq!(AllocationNotFound.clone(), AllocationNotFound);
+        assert_eq!(DoubleFreeDetected.clone(), DoubleFreeDetected);
+        assert_ne!(AllocationNotFound.clone(), DoubleFreeDetected);
+
+        assert_eq!(format!("{:?}", AllocationNotFound), "AllocationNotFound");
+        assert_eq!(format!("{:?}", DoubleFreeDetected), "DoubleFreeDetected");
+    }
 }

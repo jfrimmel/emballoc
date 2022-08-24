@@ -42,35 +42,23 @@ jobs:
       - run:
           name: Record testing coverage
           command: |
-            env \
-              RUSTFLAGS="-C instrument-coverage" \
-              LLVM_PROFILE_FILE="json5format-%m.profraw" \
-              cargo test
-            llvm-profdata merge -sparse json5format-*.profraw -o json5format.profdata
-            # according to https://doc.rust-lang.org/rustc/instrument-coverage.html#tips-for-listing-the-binaries-automatically
-            llvm-cov report $( \
-                for file in $( \
-                    RUSTFLAGS="-C instrument-coverage" \
-                      cargo test --tests --no-run --message-format=json \
-                        | jq -r "select(.profile.test == true) | .filenames[]" \
-                        | grep -v dSYM - \
-                  ); \
-                do printf "%s %s " -object $file; done \
-              ) \
-              --use-color --ignore-filename-regex='/usr/local/cargo/registry' \
-              --instr-profile=json5format.profdata
-            # according to https://stackoverflow.com/a/50884416
-            llvm-cov export -format=lcov $( \
-                for file in $( \
-                    RUSTFLAGS="-C instrument-coverage" \
-                      cargo test --tests --no-run --message-format=json \
-                        | jq -r "select(.profile.test == true) | .filenames[]" \
-                        | grep -v dSYM - \
-                  ); \
-                do printf "%s %s " -object $file; done \
-              ) \
-              --ignore-filename-regex='/usr/local/cargo/registry' \
-              --instr-profile=json5format.profdata > coverage.lcov
+            # build and run all tests. This produces a single .profraw-file per
+            # test.
+            RUSTFLAGS="-C instrument-coverage" LLVM_PROFILE_FILE="emballoc-%m.profraw" cargo test
+            # merge the individual runs into a collective .profdata-file
+            llvm-profdata merge -sparse emballoc-*.profraw -o emballoc.profdata
+
+            # collect the names of the binaries and convert them to command line
+            # parameters. This is adopted from https://doc.rust-lang.org/rustc/instrument-coverage.html#tips-for-listing-the-binaries-automatically
+            binaries=($(RUSTFLAGS="-C instrument-coverage" cargo test --tests --quiet --no-run --message-format=json | jq -r "select(.profile.test == true) | .filenames[]" | grep -v dSYM -))
+            binaries=("${binaries[@]/#/-object=}")
+
+            # Show the precise coverage, so that it shows up in the CI logs and
+            # convert it into an `lcov` file, so that it can be uploaded (this
+            # is one of the few supported format according to
+            # https://stackoverflow.com/a/50884416).
+            llvm-cov report --ignore-filename-regex='/usr/local/cargo/registry' --instr-profile=emballoc.profdata "${binaries[@]}" --use-color
+            llvm-cov export --ignore-filename-regex='/usr/local/cargo/registry' --instr-profile=emballoc.profdata "${binaries[@]}" -format=lcov > coverage.lcov
       - codecov/upload
 
   msrv:
