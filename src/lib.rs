@@ -305,6 +305,20 @@ unsafe impl<const N: usize> GlobalAlloc for Allocator<N> {
     }
 }
 
+// include the readme in doc-tests. Credits to https://blog.guillaume-gomez.fr/articles/2020-03-07+cfg%28doctest%29+is+stable+and+you+should+use+it
+#[cfg(doctest)]
+mod extra_doctests {
+    /// Helper macro to pass a "dynamic"/included string to the `extern`-block
+    macro_rules! doc_check {
+        ($x:expr) => {
+            #[doc = $x]
+            extern "C" {}
+        };
+    }
+    // Check the code snippets in the Readme.
+    doc_check!(include_str!("../README.md"));
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Allocator;
