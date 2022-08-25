@@ -71,7 +71,7 @@ A note to users on systems with advanced memory features like MMUs and MPUs:
 # Minimum supported Rust version
 
 This crate has a stability guarantee about the compiler version supported.
-The so-called minimum supported Rust version is currently set to **1.62** and won't be raised without a proper increase in the semantic version number scheme.
+The so-called minimum supported Rust version is currently set to **1.57** and won't be raised without a proper increase in the semantic version number scheme.
 This MSRV is specified in `Cargo.toml` and is tested in CI.
 
 # License

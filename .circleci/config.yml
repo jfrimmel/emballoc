@@ -63,7 +63,7 @@ jobs:
 
   msrv:
     docker:
-      - image: rust:1.62
+      - image: rust:1.57
     steps:
       - checkout
       - run:
