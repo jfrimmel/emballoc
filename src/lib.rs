@@ -326,13 +326,16 @@ unsafe impl<const N: usize> GlobalAlloc for Allocator<N> {
 
         // allocate a memory block and return the sufficiently aligned pointer
         // into that memory block.
-        match self.raw.lock().alloc(size) {
-            // SAFETY: `align` is a power of two as by the contract of `Layout`.
-            // Furthermore the memory slice is enlarged (see above), so that the
-            // aligned pointer will still be in the same allocation.
-            Some(memory) => unsafe { Self::align_to(ptr::addr_of_mut!(*memory).cast(), align) },
-            None => ptr::null_mut(),
-        }
+        self.raw
+            .lock()
+            .alloc(size)
+            .map_or(ptr::null_mut(), |memory| {
+                // SAFETY: `align` is a power of two as by the contract of
+                // `Layout`. Furthermore the memory slice is enlarged (see
+                // above), so that the aligned pointer will still be in the same
+                // allocation.
+                unsafe { Self::align_to(ptr::addr_of_mut!(*memory).cast(), align) }
+            })
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
