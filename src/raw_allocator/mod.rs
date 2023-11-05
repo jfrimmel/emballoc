@@ -91,6 +91,7 @@ impl<const N: usize> RawAllocator<N> {
     /// the just freed up one is also free, the two blocks are concatenated to a
     /// single one (to prevent fragmentation).
     pub fn free(&mut self, ptr: *mut u8) -> Result<(), FreeError> {
+        // find the offset of the entry, which the `ptr` points into
         let offset = self
             .buffer
             .entries()
@@ -105,14 +106,22 @@ impl<const N: usize> RawAllocator<N> {
             })
             .ok_or(FreeError::AllocationNotFound)?;
 
+        // check, if the entry is occupied. If it is free, a double free (or a
+        // really wrong pointer) was detected, so report an error in that case
         let entry = self.buffer[offset];
         if entry.state() == State::Free {
             return Err(FreeError::DoubleFreeDetected);
         }
+
+        // query the following free memory or `0` if the following entry is used
         let additional_memory = self
             .buffer
             .following_free_entry(offset)
             .map_or(0, |entry| entry.size() + HEADER_SIZE);
+
+        // write the header (entry) to the buffer. If the additional memory is
+        // non-zero, then the following entry is simply "ignored" by enlarging
+        // the current one
         self.buffer[offset] = Entry::free(entry.size() + additional_memory);
         Ok(())
     }
