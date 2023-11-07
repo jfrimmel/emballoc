@@ -54,6 +54,8 @@ impl<const N: usize> RawAllocator<N> {
     ///
     /// If the allocation fails, `None` will be returned.
     pub fn alloc(&mut self, n: usize) -> Option<&mut [MaybeUninit<u8>]> {
+        self.buffer.ensure_initialization();
+
         // round up `n` to next multiple of `size_of::<Entry>()`
         let n = (n + HEADER_SIZE - 1) / HEADER_SIZE * HEADER_SIZE;
 
@@ -91,6 +93,8 @@ impl<const N: usize> RawAllocator<N> {
     /// the just freed up one is also free, the two blocks are concatenated to a
     /// single one (to prevent fragmentation).
     pub fn free(&mut self, ptr: *mut u8) -> Result<(), FreeError> {
+        self.buffer.ensure_initialization();
+
         // find the offset of the entry, which the `ptr` points into
         let offset = self
             .buffer
