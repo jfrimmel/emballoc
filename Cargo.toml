@@ -17,3 +17,11 @@ targets = ["x86_64-unknown-linux-gnu"]
 version = "0.9.8"
 default-features = false
 features = ["mutex", "spin_mutex"]
+
+[features]
+# Before enabling this read the note about portable_atomic at
+# https://github.com/mvdnes/spin-rs#feature-flags
+#
+# Unless you are running on a system without atomics, you probably
+# don't want to enable this feature.
+portable_atomic = ["spin/portable_atomic"]
