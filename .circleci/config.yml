@@ -27,7 +27,7 @@ jobs:
       target:
         type: string
     docker:
-      - image: jfrimmel/miri:nightly-2022-08-22
+      - image: jfrimmel/miri:nightly-2023-11-09
     steps:
       - checkout
       - run:
@@ -36,7 +36,7 @@ jobs:
 
   coverage:
     docker:
-      - image: jfrimmel/coverage
+      - image: jfrimmel/coverage:1.1
     steps:
       - checkout
       - run:
@@ -66,9 +66,15 @@ jobs:
       - image: rust:1.57
     steps:
       - checkout
+      - restore_cache:
+          key: cargo-registry
       - run:
           name: Build the source
           command: cargo check
+      - save_cache:
+          key: cargo-registry
+          paths:
+            - /usr/local/cargo/registry/
 
   style:
     docker:
