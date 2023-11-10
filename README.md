@@ -7,7 +7,7 @@
 
 This repository provides the [`emballoc`](https://crates.io/crates/emballoc) crate: a simple memory allocator developed for usage in small embedded systems.
 It is one possible way to support dynamic memory on targets without the standard library, i.e. ones with `#![no_std]`.
-This is achieved by providing a type [`Allocation`](https://docs.rs/emballoc/*/emballoc/struct.Allocator.html) which can be registered as the global allocator for the binary.
+This is achieved by providing a type [`Allocator`](https://docs.rs/emballoc/*/emballoc/struct.Allocator.html) which can be registered as the global allocator for the binary.
 See the usage description below.
 
 An allocator is a rather critical part of a software project:
