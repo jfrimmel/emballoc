@@ -62,7 +62,7 @@ A note to users on systems with advanced memory features like MMUs and MPUs:
 
 - if you have an _memory protection unit_ (MPU) or similar available, you have to configure it yourself as this crate is platform-agnostic.
   An example usage might be to configure it, that reading from and writing to the heap is allowed, but execution is not.
-  It is not possible to surround the heap with guard pages, as this allocator will never read/write outside of the internal byte array.
+  It is not necessary to surround the heap with guard pages, as this allocator will never read/write outside of the internal byte array.
   However it might be advised to guard the stack, so that it doesn't grow into the heap (or any other variable).
 - if you have an (active) _memory management unit_ (MMU), this is likely not the crate for you: it doesn't use any of the important features, which makes it perform much worse than possible.
   Use a proper memory allocator for that use case (one that supports paging, etc.).
