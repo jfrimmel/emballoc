@@ -9,6 +9,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/jfrimmel/emballoc"
 documentation = "https://docs.rs/emballoc"
 rust-version = "1.57"
+exclude = ["/.circleci"]
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
