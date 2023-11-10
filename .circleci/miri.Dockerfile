@@ -1,4 +1,4 @@
-FROM rust:1.62
+FROM rust:latest
 
 # the specific nightly version to use
 ARG nightly_version
