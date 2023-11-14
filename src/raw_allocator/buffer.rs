@@ -18,13 +18,15 @@ pub struct ValidatedOffset(usize);
 
 /// The buffer memory backing the heap.
 #[repr(align(4))]
-pub struct Buffer<const N: usize>([MaybeUninit<u8>; N]);
+pub struct Buffer<const N: usize>(LazyInitializedBuffer<N>);
 impl<const N: usize> Buffer<N> {
     /// Create a new buffer.
     ///
-    /// This buffer will be uninitialized except for the first few bytes, which
-    /// contain the first header. This header is a free [`Entry`] with the size
-    /// of the remaining buffer.
+    /// This buffer will be initially uninitialized and will be initialized on
+    /// the first use. This will write the first header, which is a free
+    /// [`Entry`] with the size of the remaining buffer. This
+    /// lazy-initialization is necessary to ensure, that the buffer does not end
+    /// up in the `.data`-segment.
     ///
     /// # Panics
     /// This function panics if the buffer is less than 4 bytes in size, i.e. if
@@ -32,16 +34,8 @@ impl<const N: usize> Buffer<N> {
     pub const fn new() -> Self {
         assert!(N >= HEADER_SIZE, "buffer too small, use N >= 4");
         assert!(N % HEADER_SIZE == 0, "memory size has to be divisible by 4");
-        let remaining_size = N - HEADER_SIZE;
-        let initial_entry = Entry::free(remaining_size).as_raw();
 
-        // this is necessary, since there mut be always a valid first entry
-        let mut buffer = [MaybeUninit::uninit(); N];
-        buffer[0] = MaybeUninit::new(initial_entry[0]);
-        buffer[1] = MaybeUninit::new(initial_entry[1]);
-        buffer[2] = MaybeUninit::new(initial_entry[2]);
-        buffer[3] = MaybeUninit::new(initial_entry[3]);
-        Self(buffer)
+        Self(LazyInitializedBuffer::new())
     }
 
     /// Obtain a reference to an [`Entry`] inside of the buffer.
@@ -236,6 +230,68 @@ impl<'buffer, const N: usize> Iterator for EntryIter<'buffer, N> {
             self.offset += entry.size() + HEADER_SIZE;
             ValidatedOffset(offset)
         })
+    }
+}
+
+/// A `[MaybeUninit<u8>; N]`, which gets initialized and thus is free heap on
+/// the first use.
+///
+/// This buffer is written in such a way, that it is not initialized with
+/// non-zero values. This makes sure, that it does not end up in the `.data`
+/// section of the final binary.
+#[repr(C, align(4))]
+struct LazyInitializedBuffer<const N: usize> {
+    /// The inner buffer. This is fully uninitialized when created with
+    /// [`LazyInitializedBuffer::new()`].
+    buffer: core::cell::UnsafeCell<[MaybeUninit<u8>; N]>,
+    /// Flag, whether or not this buffer was already initialized.
+    is_initialized: core::cell::Cell<bool>,
+}
+impl<const N: usize> LazyInitializedBuffer<N> {
+    /// Create a new ` LazyInitializedBuffer`.
+    // TODO: this should really take a callback on how to do the initialization,
+    // so that the `LazyInitializedBuffer` does not need to know, what an entry
+    // is and how it should be stored in the buffer. This is currently not
+    // possible, as this would require mutable references to the buffer in a
+    // `const` context.
+    pub const fn new() -> Self {
+        Self {
+            buffer: core::cell::UnsafeCell::new([MaybeUninit::uninit(); N]),
+            is_initialized: core::cell::Cell::new(false),
+        }
+    }
+}
+impl<const N: usize> core::ops::Deref for LazyInitializedBuffer<N> {
+    type Target = [MaybeUninit<u8>; N];
+
+    /// Index into the (lazily-initialized) buffer.
+    ///
+    /// If necessary, this will initialize the buffer, if it is not yet
+    /// initialized.
+    fn deref(&self) -> &Self::Target {
+        if !self.is_initialized.get() {
+            // write the first entry to the buffer
+            let remaining_size = N - HEADER_SIZE;
+            let initial_entry = Entry::free(remaining_size).as_raw();
+            let buffer = unsafe { self.buffer.get().as_mut().unwrap() };
+            buffer[0] = MaybeUninit::new(initial_entry[0]);
+            buffer[1] = MaybeUninit::new(initial_entry[1]);
+            buffer[2] = MaybeUninit::new(initial_entry[2]);
+            buffer[3] = MaybeUninit::new(initial_entry[3]);
+
+            self.is_initialized.set(true);
+        }
+        unsafe { self.buffer.get().as_ref().unwrap() }
+    }
+}
+impl<const N: usize> core::ops::DerefMut for LazyInitializedBuffer<N> {
+    /// Index into the already initialized buffer.
+    ///
+    /// This must not be called before a non-mutable index operation, as only
+    /// this operation initializes the buffer.
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        debug_assert!(self.is_initialized.get());
+        self.buffer.get_mut()
     }
 }
 
