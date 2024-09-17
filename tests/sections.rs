@@ -37,16 +37,12 @@ fn ensure_that_allocator_memory_is_not_initialized() {
     }
 
     let memory_map = MemoryMap::new();
-    assert_eq!(
-        memory_map.bss_start, memory_map.data_end,
-        "test assumes .bss directly after .data"
-    );
+    let bss_start = memory_map.bss_start;
+    let data_end = memory_map.data_end;
+    assert_eq!(bss_start, data_end, "test assumes bss directly after data");
 
     let addr_allocator = ptr::addr_of!(ALLOCATOR) as usize;
-    assert!(
-        addr_allocator >= memory_map.bss_start,
-        "The allocator is placed in the .data-segment"
-    );
+    assert!(addr_allocator >= bss_start, "allocator is placed in .data");
 }
 
 /// The (at runtime) reconstructed memory map containing addresses of sections.
