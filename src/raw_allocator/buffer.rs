@@ -172,6 +172,7 @@ impl<const N: usize> Buffer<N> {
     /// obtain the entry after it. If there is no entry after it (because the
     /// given one is the last in the buffer) or if the entry following it is a
     /// used one, then `None` is returned.
+    #[allow(clippy::needless_pass_by_ref_mut)] // this is a "mutable" operation
     pub fn following_free_entry(&mut self, offset: ValidatedOffset) -> Option<Entry> {
         let iter_starting_at_offset = EntryIter {
             buffer: self,
