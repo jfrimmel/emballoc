@@ -133,6 +133,8 @@ impl<const N: usize> RawAllocator<N> {
 
 #[cfg(test)]
 mod tests {
+    use crate::raw_allocator;
+
     use super::{Entry, FreeError, RawAllocator};
 
     /// Test, that the given allocator has exactly the given entries.
@@ -178,6 +180,48 @@ mod tests {
         // the second allocation is larger than the remaining space
         assert!(allocator.alloc(13).is_none());
         assert_allocations!(allocator, Entry::used(12), Entry::free(12));
+    }
+
+    #[test]
+    fn no_more_space_available() {
+        let mut allocator = RawAllocator::<32>::new();
+        allocator.alloc(4).unwrap();
+        allocator.alloc(4).unwrap();
+        allocator.alloc(4).unwrap();
+        allocator.alloc(4).unwrap();
+
+        // now the allocator is entirely filled
+        let free_entries = allocator
+            .buffer
+            .entries()
+            .map(|offset| allocator.buffer[offset])
+            .filter(|entry| entry.state() == raw_allocator::State::Free)
+            .count();
+        assert_eq!(free_entries, 0);
+
+        // the next allocation needs to fail
+        assert!(allocator.alloc(4).is_none());
+    }
+
+    #[test]
+    fn not_enough_space_available() {
+        let mut allocator = RawAllocator::<32>::new();
+        allocator.alloc(4).unwrap();
+        allocator.alloc(4).unwrap();
+        allocator.alloc(4).unwrap();
+
+        // now the allocator is entirely filled
+        let total_free_bytes = allocator
+            .buffer
+            .entries()
+            .map(|offset| allocator.buffer[offset])
+            .filter(|entry| entry.state() == raw_allocator::State::Free)
+            .map(|entry| entry.size())
+            .fold(0, |sum, size| sum + size);
+        assert_eq!(total_free_bytes, 4);
+
+        // the next allocation needs to fail
+        assert!(allocator.alloc(5).is_none());
     }
 
     macro_rules! address {
