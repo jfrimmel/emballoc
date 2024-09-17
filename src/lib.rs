@@ -285,6 +285,7 @@ impl<const N: usize> Allocator<N> {
     /// emballoc::Allocator::<4>::new(); // less than 8
     /// ```
     #[must_use = "assign the allocator to a static variable and apply the `#[global_allocator]`-attribute to make it the global allocator"]
+    #[allow(clippy::new_without_default)] // this could be added, but not now
     pub const fn new() -> Self {
         let raw = spin::Mutex::new(RawAllocator::new());
         Self { raw }

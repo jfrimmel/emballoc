@@ -22,8 +22,10 @@ pub struct Buffer<const N: usize>([MaybeUninit<u8>; N]);
 impl<const N: usize> Buffer<N> {
     /// Create a new buffer.
     ///
-    /// This buffer will be uninitialized except for the first few bytes, which
-    /// contain the first header. This header is a free [`Entry`] with the size
+    /// This buffer will be uninitialized except for the first few bytes: the
+    /// firs `HEADER_SIZE` bytes are initialized to zero. The caller must
+    /// subsequently call [`Buffer::ensure_initialization()`] to initialize the
+    /// first bytes as the header. This header is a free [`Entry`] with the size
     /// of the remaining buffer.
     ///
     /// # Panics
@@ -32,16 +34,39 @@ impl<const N: usize> Buffer<N> {
     pub const fn new() -> Self {
         assert!(N >= HEADER_SIZE, "buffer too small, use N >= 4");
         assert!(N % HEADER_SIZE == 0, "memory size has to be divisible by 4");
-        let remaining_size = N - HEADER_SIZE;
-        let initial_entry = Entry::free(remaining_size).as_raw();
 
-        // this is necessary, since there mut be always a valid first entry
+        // initialize the header bytes to zero to make sure, that we can check
+        // against zero later without undefined behavior.
         let mut buffer = [MaybeUninit::uninit(); N];
-        buffer[0] = MaybeUninit::new(initial_entry[0]);
-        buffer[1] = MaybeUninit::new(initial_entry[1]);
-        buffer[2] = MaybeUninit::new(initial_entry[2]);
-        buffer[3] = MaybeUninit::new(initial_entry[3]);
+        buffer[0] = MaybeUninit::new(0x00);
+        buffer[1] = MaybeUninit::new(0x00);
+        buffer[2] = MaybeUninit::new(0x00);
+        buffer[3] = MaybeUninit::new(0x00);
         Self(buffer)
+    }
+
+    /// Ensure, that the buffer is initialized.
+    ///
+    /// This separate step is necessary to make sure, that the buffer is not
+    /// initialized with non-zero data in the binary (i.e when calling `new()`).
+    pub fn ensure_initialization(&mut self) {
+        let buffer = &mut self.0;
+        let not_yet_initialized = buffer
+            .iter_mut()
+            .take(HEADER_SIZE)
+            // SAFETY: the bytes of the first entry are initialized in `new()`
+            .map(|byte| unsafe { byte.assume_init() })
+            .all(|byte| byte == 0x00);
+
+        if not_yet_initialized {
+            let remaining_size = N - HEADER_SIZE;
+            let initial_entry = Entry::free(remaining_size).as_raw();
+
+            buffer[0] = MaybeUninit::new(initial_entry[0]);
+            buffer[1] = MaybeUninit::new(initial_entry[1]);
+            buffer[2] = MaybeUninit::new(initial_entry[2]);
+            buffer[3] = MaybeUninit::new(initial_entry[3]);
+        }
     }
 
     /// Obtain a reference to an [`Entry`] inside of the buffer.
@@ -147,6 +172,7 @@ impl<const N: usize> Buffer<N> {
     /// obtain the entry after it. If there is no entry after it (because the
     /// given one is the last in the buffer) or if the entry following it is a
     /// used one, then `None` is returned.
+    #[allow(clippy::needless_pass_by_ref_mut)] // this is a "mutable" operation
     pub fn following_free_entry(&mut self, offset: ValidatedOffset) -> Option<Entry> {
         let iter_starting_at_offset = EntryIter {
             buffer: self,
@@ -262,7 +288,8 @@ mod tests {
 
     #[test]
     fn empty_allocator() {
-        let buffer = Buffer::<32>::new();
+        let mut buffer = Buffer::<32>::new();
+        buffer.ensure_initialization();
         let expected = Entry::free(32 - 4);
         let actual = unsafe { buffer.at(0).assume_init() };
         assert_eq!(expected, actual);
@@ -294,12 +321,14 @@ mod tests {
 
     #[test]
     fn entry_iter() {
-        let buffer = Buffer::<32>::new();
+        let mut buffer = Buffer::<32>::new();
+        buffer.ensure_initialization();
         let mut iter = buffer.entries();
         assert_eq!(iter.next(), Some(ValidatedOffset(0)));
         assert_eq!(iter.next(), None);
 
         let mut buffer = Buffer::<32>::new();
+        buffer.ensure_initialization();
         buffer.at_mut(0).write(Entry::free(4));
         buffer.at_mut(8).write(Entry::used(4));
         buffer.at_mut(16).write(Entry::free(12));
@@ -313,6 +342,7 @@ mod tests {
     #[test]
     fn indexing() {
         let mut buffer = Buffer::<32>::new();
+        buffer.ensure_initialization();
         buffer.at_mut(8).write(Entry::used(4));
 
         assert_eq!(buffer[ValidatedOffset(8)], Entry::used(4));
@@ -323,7 +353,8 @@ mod tests {
     #[test]
     #[should_panic]
     fn at_out_of_bounds() {
-        let buffer = Buffer::<32>::new();
+        let mut buffer = Buffer::<32>::new();
+        buffer.ensure_initialization();
         buffer.at(64); // panic here
     }
 
@@ -331,13 +362,15 @@ mod tests {
     #[should_panic]
     fn at_mut_out_of_bounds() {
         let mut buffer = Buffer::<32>::new();
+        buffer.ensure_initialization();
         buffer.at_mut(64); // panic here
     }
 
     #[test]
     #[should_panic]
     fn at_unaligned() {
-        let buffer = Buffer::<32>::new();
+        let mut buffer = Buffer::<32>::new();
+        buffer.ensure_initialization();
         buffer.at(2); // panic here
     }
 
@@ -345,12 +378,14 @@ mod tests {
     #[should_panic]
     fn at_mut_unaligned() {
         let mut buffer = Buffer::<32>::new();
+        buffer.ensure_initialization();
         buffer.at_mut(2); // panic here
     }
 
     #[test]
     fn following_free_entry() {
         let mut buffer = Buffer::<24>::new();
+        buffer.ensure_initialization();
         buffer.at_mut(0).write(Entry::used(4));
         buffer.at_mut(8).write(Entry::used(4));
         buffer.at_mut(16).write(Entry::free(4));
@@ -371,6 +406,7 @@ mod tests {
         use core::ptr;
 
         let mut buffer = Buffer::<20>::new();
+        buffer.ensure_initialization();
         buffer.at_mut(0).write(Entry::used(4));
 
         let expected = &buffer.0[4..8];
@@ -381,6 +417,7 @@ mod tests {
     #[test]
     fn mark_used_without_split() {
         let mut buffer = Buffer::<24>::new();
+        buffer.ensure_initialization();
         buffer.at_mut(0).write(Entry::used(4));
         buffer.at_mut(8).write(Entry::free(4));
         buffer.at_mut(16).write(Entry::used(4));
@@ -396,6 +433,7 @@ mod tests {
     #[test]
     fn mark_used_with_split() {
         let mut buffer = Buffer::<32>::new();
+        buffer.ensure_initialization();
         buffer.at_mut(0).write(Entry::used(4));
         buffer.at_mut(8).write(Entry::free(20));
 
