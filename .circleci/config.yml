@@ -27,7 +27,7 @@ jobs:
       target:
         type: string
     docker:
-      - image: jfrimmel/miri:nightly-2023-11-09
+      - image: jfrimmel/miri:nightly-2024-09-18
     steps:
       - checkout
       - run:
