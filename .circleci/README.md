@@ -23,5 +23,6 @@ This container is a version of `rust`, which already contains a pre-installed co
 To build the container use:
 
 ```bash
-docker build -t jfrimmel/coverage -f .circleci/coverage.Dockerfile .circleci/
+VERSION=2022-08-22
+docker build -t "jfrimmel/coverage:nightly-$VERSION" --build-arg "nightly_version=$VERSION" -f .circleci/coverage.Dockerfile .circleci/
 ```
