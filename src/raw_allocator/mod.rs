@@ -289,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_free() {
+    fn non_allocated_pointer_freed() {
         use core::ptr;
 
         let mut allocator = RawAllocator::<32>::new();
@@ -300,6 +300,17 @@ mod tests {
         let mut x = 0_u32;
         let ptr = ptr::addr_of_mut!(x).cast();
         assert_eq!(allocator.free(ptr), Err(FreeError::AllocationNotFound));
+    }
+
+    #[test]
+    fn invalid_pointer_freed() {
+        let mut allocator = RawAllocator::<16>::new();
+        let ptr = address!(allocator.alloc(4).unwrap());
+
+        // try to free a pointer, which was returned by the allocator, but since
+        // then was slightly modified.
+        let bogus = ptr.wrapping_add(6);
+        assert_eq!(allocator.free(bogus), Err(FreeError::AllocationNotFound));
     }
 
     #[test]
