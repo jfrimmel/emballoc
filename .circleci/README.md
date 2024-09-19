@@ -8,10 +8,12 @@ It also contains docker files for custom containers used during the CI run.
 
 This container is a version of `rust`, which already contains a pre-setup `miri` environment.
 
-To build the docker container, select the desired nightly version (which, of course, has to contain the `miri` component) and run the following command from the repository root (replace `2022-08-22` with the required version):
+To build the docker container, select the desired nightly version (which, of course, has to contain the `miri` component) and run the following command from the repository root (store the requested version in `$VERSION`):
 
 ```bash
-docker build -t jfrimmel/miri:nightly-2022-08-22 --build-arg nightly_version=2022-08-22 -f .circleci/miri.Dockerfile .circleci/
+VERSION=2022-08-22
+docker build -t "jfrimmel/miri:nightly-$VERSION" --build-arg "nightly_version=$VERSION" -f .circleci/miri.Dockerfile .circleci/
+docker push "jfrimmel/miri:nightly-$VERSION"
 ```
 
 ## Container for coverage testing
@@ -21,5 +23,6 @@ This container is a version of `rust`, which already contains a pre-installed co
 To build the container use:
 
 ```bash
-docker build -t jfrimmel/coverage -f .circleci/coverage.Dockerfile .circleci/
+VERSION=2022-08-22
+docker build -t "jfrimmel/coverage:nightly-$VERSION" --build-arg "nightly_version=$VERSION" -f .circleci/coverage.Dockerfile .circleci/
 ```
